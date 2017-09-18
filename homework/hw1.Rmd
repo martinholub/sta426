@@ -1,0 +1,38 @@
+---
+title: "sta426_hw1"
+author: "mholub"
+date: "September 18, 2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+options(digits =2)
+```
+
+## Introductory lecture on R in sta426 - Homework
+Sample 100 points from lognormal distribution:
+
+```{r sample}
+x <- rlnorm(n = 100, meanlog = 1, sdlog = .25)
+```
+
+Create histogram of the sampled values:
+
+```{r histogram, echo=TRUE}
+hist(x, breaks = 20)
+```
+
+Create histogram of the logarithm of sampled values.
+
+``` {r loghistogram}
+hist(log(x), breaks =20)
+```
+
+Calculate mean and standard deviation of the drawn sample:
+
+```{r moments of distribution}
+mu <- mean(x)
+sd2 <- var(x)
+```
+Mean of the sample is mu = `r mu` and variance is var =`r sd2`.

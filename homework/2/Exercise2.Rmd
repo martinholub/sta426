@@ -1,0 +1,85 @@
+---
+title: "Exercise 2"
+author: "Holub Martin"
+date: "25 9 2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Exploratory Data Analysis
+
+Do an exploratory data analysis of a matrix of expression values. Load the data and display:
+* distributions: *boxplot*, *density*, *limma::plotDensities*
+* normalization: *limma::normalizeQuantiles*
+* clustering: *hclust*
+* heatmap: *heatmap.2* or *pheatmap*
+* correlation matrix: *cor* and *image*
+* reduced dimensionality representation: *cmdscale* and *prcomp*
+
+
+## Data Import
+```{r }
+anno = read.table("SampleAnnotation.txt", as.is=TRUE, sep="\t", quote="",
+                  row.names=1, header=TRUE)
+x = read.table("expressionData.txt", as.is=TRUE, sep="\t", quote="", row.names=1, header=TRUE, check.names = FALSE)
+x = as.matrix(x)
+```
+
+## Define samples and colors and phenotype
+```{r}
+samples = rownames(anno)
+colors = rainbow(nrow(anno))
+isNorm = anno$TissueType == "norm"
+isSick = anno$TissueType == "sick"
+isAcute = anno$TissueType == "acute"
+```
+## Boxplot on a gene expression matrix
+
+First transfrom with log2.
+
+```{r}
+boxplot(log2(x), use.cols = TRUE)
+```
+
+We see that the boxplot for all samples looks similarly, unsurprisingly as it is aggregate of `r length(unique(rownames(x)))` measurements. We look at othher exploratory plot.
+
+## Kernel Density Estimation
+Plot density estimates of log2 transformed gene expression levelsfor all samples
+```{r}
+for (i in 1:dim(x)[2]){
+  df = density(log2(x[, i]), bw ="SJ", kernel= "gauss", na.rm = TRUE)
+  color = colors[i]
+  name = samples[i]
+  if (i == 1){
+    plot(df, col = color)
+  } else {
+    lines(df, col = color)
+  } }
+legend("topright", legend = samples, col = colors, lwd = 2.5, ncol = 2)
+```
+
+### Use limma::PlotDensities function
+Here we can obtain the same plot with an one liner.
+Correspondingly with the boxplot we see that mo stof the mass is located at lower value of expression levels (corresponding to 2-4 fold change). We also notice that there is a bump in the distribution around 8 fold change.
+```{r}
+limma::plotDensities(object = log2(x), col = colors, legend = "topright")
+```
+## Normalize data
+
+Normalize columns of a matrix to have same quantiles and visualize densities. We see that they overlap for all samples indicating quantile allignement. We will keep working with the normalized data.
+
+```{r}
+x_norm <- limma::normalizeQuantiles((x))
+limma::plotDensities(object = log2(x_norm), col = colors, legend = "topright")
+```
+
+## Hiearchical clustering
+```{r}
+dist_measure <- dist(x_norm[, 2], method = "euclidian")
+clusters <- hclust(dist_measure)
+plot(clusters)
+clusters
+```

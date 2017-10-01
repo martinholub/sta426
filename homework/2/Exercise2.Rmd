@@ -77,9 +77,26 @@ limma::plotDensities(object = log2(x_norm), col = colors, legend = "topright")
 ```
 
 ## Hiearchical clustering
+
+Pick a gene and look at partitioning to clusters. We observe that sick+acute and normal conditions appear together in respective clusters. Sick_14 appears to be an outlier. We use 1 - cor(x,y) as a distance metric, as discussed in lecture.
+
 ```{r}
-dist_measure <- dist(x_norm[, 2], method = "euclidian")
+# dist_measure <- dist(x_norm[1:10, ], method = "euclidian")
+dist_measure <- as.dist((1-cor(x_norm))/2)
 clusters <- hclust(dist_measure)
 plot(clusters)
-clusters
+```
+
+## Heatmap
+
+Next we plot a heatmap
+
+```{r}
+dist_fun <-function(data){
+  # Distance measure based on correlation
+  return(as.dist((1-cor( t(data)) )/2))
+}
+
+gplots::heatmap.2(x_norm, distfun = dist_fun, col = colors, dendrogram = "row")
+
 ```

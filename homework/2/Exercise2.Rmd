@@ -1,7 +1,7 @@
 ---
 title: "Exercise 2"
 author: "Holub Martin"
-date: "25 9 2017"
+date: "01 10 2017"
 output: html_document
 ---
 
@@ -11,6 +11,7 @@ knitr::opts_chunk$set(echo = TRUE)
 
 ## Exploratory Data Analysis
 
+**TASK**
 Do an exploratory data analysis of a matrix of expression values. Load the data and display:
 * distributions: *boxplot*, *density*, *limma::plotDensities*
 * normalization: *limma::normalizeQuantiles*
@@ -21,82 +22,217 @@ Do an exploratory data analysis of a matrix of expression values. Load the data 
 
 
 ## Data Import
-```{r }
-anno = read.table("SampleAnnotation.txt", as.is=TRUE, sep="\t", quote="",
-                  row.names=1, header=TRUE)
-x = read.table("expressionData.txt", as.is=TRUE, sep="\t", quote="", row.names=1, header=TRUE, check.names = FALSE)
+```{r import}
+anno = read.table("SampleAnnotation.txt", as.is=TRUE, sep="\t", 
+                  quote="", row.names=1, header=TRUE)
+x = read.table("expressionData.txt", as.is=TRUE, sep="\t", 
+               quote="", row.names=1, header=TRUE, check.names = FALSE)
 x = as.matrix(x)
 ```
 
 ## Define samples and colors and phenotype
-```{r}
+```{r annotations}
 samples = rownames(anno)
 colors = rainbow(nrow(anno))
 isNorm = anno$TissueType == "norm"
 isSick = anno$TissueType == "sick"
 isAcute = anno$TissueType == "acute"
 ```
+
 ## Boxplot on a gene expression matrix
 
-First transfrom with log2.
+Plot a boxplot of log2 transformed data.
 
-```{r}
-boxplot(log2(x), use.cols = TRUE)
+```{r boxplot}
+boxplot(log2(x), las = 2, main = "Boxplot", use.cols = TRUE)
 ```
 
-We see that the boxplot for all samples looks similarly, unsurprisingly as it is aggregate of `r length(unique(rownames(x)))` measurements. We look at othher exploratory plot.
+We see that the boxplots for all samples looks similarl, unsurprisingly as it aggregates information from `r length(unique(rownames(x)))` genes. We look at othher exploratory plot to probe highly expressed outliers that are of interst for us.
+
+We will **continue working with log2 transfromed data** as this allows for easier comparison of expression levels between genes and samples (more specifically, log2 transformed data coressponds to fold-change in gene expression levels.) 
 
 ## Kernel Density Estimation
-Plot density estimates of log2 transformed gene expression levelsfor all samples
-```{r}
+
+We now plot density estimates of log2 transformed gene expression levels for all samples. We use Gaussian Kernel for smoothing the distances. KDE is somewhat akin to histogram in that it is also a non-parametetric DE estimation method. However it is better suited for data of higher diemnsions and uses a suer-defined kernel for smoothing the result. 
+
+```{r kernel}
 for (i in 1:dim(x)[2]){
   df = density(log2(x[, i]), bw ="SJ", kernel= "gauss", na.rm = TRUE)
   color = colors[i]
   name = samples[i]
   if (i == 1){
-    plot(df, col = color)
+    plot(df, col = color, main = "Kernel Density Estimation")
   } else {
     lines(df, col = color)
   } }
-legend("topright", legend = samples, col = colors, lwd = 2.5, ncol = 2)
+legend("topright", legend = samples, col = colors, lwd = 1, cex = 0.75,
+       y.intersp = 0.75, ncol = 1)
 ```
 
 ### Use limma::PlotDensities function
-Here we can obtain the same plot with an one liner.
-Correspondingly with the boxplot we see that mo stof the mass is located at lower value of expression levels (corresponding to 2-4 fold change). We also notice that there is a bump in the distribution around 8 fold change.
-```{r}
-limma::plotDensities(object = log2(x), col = colors, legend = "topright")
+
+Here we can obtain the same plot with an one-liner.
+Correspondingly with the boxplot we see that most of the mass is located at lower value of expression levels (corresponding to 2-4 fold change). We also notice that there is a bump in the distribution around 8 fold change.
+
+```{r limma}
+limma::plotDensities(object = log2(x), col = colors, legend = FALSE,
+                     main = "limma::PlotDensities")
+legend("topright", legend = samples, col = colors, lwd = 1, cex = 0.75,
+       y.intersp = 0.75, ncol = 1)
 ```
+When we compare plots produced by _density()_ and _limma:PlotDensities()_, we may observe a differnece in smoothnes of individual estimates. This is due to different method for choice of a bandwith. Whereas in the former we use _SJ_ [Sheather & Jones (1991)](http://ssg.mit.edu/cal/abs/2000_spring/np_dens/density-estimation/sheather91.pdf) whereas in the latter the default _bw.nrd0_ is used. The documentation recommends _SJ_. 
+
+It would be interesting to obtain the bandwith for _limma:PlotDensities()_, but it doesn't appear to be easily accesible.
+
 ## Normalize data
 
 Normalize columns of a matrix to have same quantiles and visualize densities. We see that they overlap for all samples indicating quantile allignement. We will keep working with the normalized data.
 
-```{r}
+_Wikipedia has a straighforward example on_ [Quantile Normalization](https://en.wikipedia.org/wiki/Quantile_normalization).
+
+```{r limma_norm}
 x_norm <- limma::normalizeQuantiles((x))
-limma::plotDensities(object = log2(x_norm), col = colors, legend = "topright")
+limma::plotDensities(object = log2(x_norm), col = colors, legend = FALSE,
+                     main ="limma::plotDensities of Quantile Normalized data")
+legend("topright", legend = samples, col = colors, lwd = 1, cex = 0.75,
+       y.intersp = 0.75, ncol = 1)
 ```
 
 ## Hiearchical clustering
 
-Pick a gene and look at partitioning to clusters. We observe that sick+acute and normal conditions appear together in respective clusters. Sick_14 appears to be an outlier. We use 1 - cor(x,y) as a distance metric, as discussed in lecture.
+Netx, we look at partitioning of samples to clusters. We observe that sick+acute and normal conditions appear together in respective clusters. Sick_14 appears to be an outlier. We use *1 - cor(x,y)* as a distance metric, as discussed in lecture.
 
-```{r}
-# dist_measure <- dist(x_norm[1:10, ], method = "euclidian")
-dist_measure <- as.dist((1-cor(x_norm))/2)
-clusters <- hclust(dist_measure)
+*Note: used method 'Ward's minimum variance' aims at finding compact, spherical clusters.*
+
+```{r clust}
+# dist_measure <- as.dist((1-cor(log2(x))))
+dist_fun <-function(data){
+  # Distance measure based on correlation of log2 transformed data
+  data_log2 = log2(data)
+  return(as.dist((1-cor((data_log2)))))
+}
+clusters <- hclust(dist_fun(x_norm), method = "ward.D")
 plot(clusters)
 ```
 
 ## Heatmap
 
-Next we plot a heatmap
+Next we plot a heatmap of distances defined as previously.
+
+```{r heatmap}
+my_palette <- colorRampPalette(c("orange", "red"))(n = 100)
+gplots::heatmap.2(x_norm, distfun = dist_fun,
+                  dendrogram = "row",
+                  Rowv = as.dendrogram(clusters), Colv = "Rowv", 
+                  labCol = "", labRow = samples,
+                  density.info="none",
+                  col = my_palette,
+                  trace = "none",
+                  scale = "none",
+                  main = "Expression Heatmap")
+
+# We may also use different functions to obtain similar results
+# pheatmap::pheatmap(x_norm, main = "HeatMap",
+#                    #clustering_distance_rows = dist_fun,
+#                    #clustering_distance_cols = dist_fun,
+#                    clustering_method = "ward.D",
+#                    color = colorRampPalette(c('green', 'orange'))(100),
+#                    annotation_row = samples)
+```
+
+## Correlation matrix
+
+Next we compute correlations between samples and plot the matrix as an image.
+
+```{r palette}
+# First, generate some color palette. Later may spend some time to find color-blinded friendly one.
+cor_palette = colorRampPalette(c("white", "blue"))(n = 100)
+
+x_corr = cor(log2(x_norm))
+```
+
+```{r heatmap2}
+image(x=seq(nrow(x_corr)), y=seq(ncol(x_corr)), z=x_corr,
+      main = "correlation matrix", col = cor_palette,
+      xlab = "", ylab = "", axes = F)
+axis(1, at=seq(nrow(x_corr)), labels = samples, las=2)
+axis(2, at=seq(ncol(x_corr)), labels = samples, las=1)
+```
+
+We can also make our lives easier by using dedicated package:
+
+```{r corrplot}
+corrplot::corrplot(x_corr, title = "Correlation Matrix",
+                   method = "color", cl.pos="b")
+```
+
+Or plotting correlation matrix as a heatmap:
 
 ```{r}
-dist_fun <-function(data){
-  # Distance measure based on correlation
-  return(as.dist((1-cor( t(data)) )/2))
-}
+heatmap(x_corr, main = "Correlation Heatmap", col = cor_palette,
+        distfun = dist_fun)
+```
+We immediately see that plotting of the correlation matrix can be very deceiving, depending on the scale of the colorspace we use. The correlation values range from `r min(x_corr)` to `r max(x_corr)`, but the first and last shown plot visually suggest much larger differences.Only the second one gives correct representation of correlation values. 
 
-gplots::heatmap.2(x_norm, distfun = dist_fun, col = colors, dendrogram = "row")
+_This could be of course corrected for (in cases 1 and 3) by cliping the colormap or showing a colorbar._
+
+## Dimensionality reduction
+
+First, we take a look at multi-dimensional scaling that tries to preserve distance between individual feature vectors (samples) as well as possible. We reduce the dimensionality to 2 so that we can plot the result in 2D.
+
+```{r}
+# Get cluster membership from previous clustering
+mycl <- cutree(clusters, h=max(clusters$height/4))
+
+#Define Coloring
+clusterCols_unique <- rainbow(length(unique(mycl)))
+# create vector of colors for legend
+clusterCols <- vector(mode = "character", length =length(mycl))
+clusterCols[mycl == 1 ] <- clusterCols_unique[1]
+clusterCols[mycl == 2 ] <- clusterCols_unique[2]
+clusterCols[mycl == 3 ] <- clusterCols_unique[3]
+
+# Do multidimensional scaling
+x_mds <- cmdscale(dist_fun(x_norm), k = 2)
+plot(x_mds, main = "Multi-dimensional scaling of expression levels", col = clusterCols, pch = 16)
+
+names <- c("norm", "sick", "acute")
+legend("top",legend = names, col = clusterCols_unique, cex = 0.75,
+       y.intersp = 0.75, ncol = 1, pch = 16)
 
 ```
+We see that the samples tend to cluster together according to their condition. This is a good sign for us as it means that we have discovered some structure in the data.
+
+Next, we find the coordinate transformation that captures the most of the variance in the first dimensions, ie. we use PCA. We than plot the first two principal components.
+
+```{r}
+#list[sdev, rotation, x_transformed, center, scale]
+pca_res <- prcomp(x = x_norm, center = TRUE, scale = TRUE)
+plot(pca_res$rotation[,1:2], main = "PCA of expression levels", col = clusterCols, pch = 16)
+
+names <- c("norm", "sick", "acute")
+legend("topright",legend = names, col = clusterCols_unique, cex = 0.75,
+       y.intersp = 0.75, ncol = 1, pch = 16)
+```
+
+Similarly, we observe that samples cluster togetehr according to their condition but the separation is not as obvious as with MDS. We look at 2nd and 3rd PC and see that they give us better representation of disimilarity in the data.
+
+```{r}
+#list[sdev, rotation, x_transformed, center, scale]
+pca_res <- prcomp(x = x_norm, center = TRUE, scale = TRUE)
+plot(pca_res$rotation[,2:3], main = "PCA of expression levels", col = clusterCols, pch = 16)
+
+names <- c("norm", "sick", "acute")
+legend("topright",legend = names, col = clusterCols_unique, cex = 0.75,
+       y.intersp = 0.75, ncol = 1, pch = 16)
+```
+
+We may also show how variance explained by each component decreases and see that most of it is captured by first 3 components:
+
+```{r}
+tot_var = sum(pca_res$sdev)
+explained_var = pca_res$sdev / tot_var * 100
+plot(explained_var, type = 'l', main = 'Variance explained by given PC', xlab = "# of PC", ylab = "% of explained variance")
+```
+
+This concludes the Homework #2. Thank you for going through this notebook:)

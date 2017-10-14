@@ -1,0 +1,95 @@
+---
+title: "Exercise 4"
+author: "Holub Martin"
+date: "8 10 2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+## Mapping in practice
+
+Check the online available manuals for the mappers
+* bowtie2  
+* tophat2  
+* STAR  
+
+and answer the questions  
+* How do these mappers score alignments?  
+* What reporting options are available?  
+
+### Scoring
+
+**TopHat2** outputs MAPQ scores in the BAM/SAM files with possible values 0, 1, 2, or 50. The first three values indicate mappings to 5, 3-4, or 2 locations, whereas a value of 50 represents a unique match. In previous versions, 50 was replaced by 255. [2](http://www.acgt.me/blog/2015/3/17/more-madness-with-mapq-scores-aka-why-bioinformaticians-hate-poor-and-incomplete-software-documentation)
+
+*Bowtie2* generates MAPQ scores between 0-42 [1](https://sequencing.qcfail.com/articles/mapq-values-are-really-useful-but-their-implementation-is-a-mess/),[2] (http://www.acgt.me/blog/2015/3/17/more-madness-with-mapq-scores-aka-why-bioinformaticians-hate-poor-and-incomplete-software-documentation)
+
+**STAR** uses the same scoring as tophat, i.e. assings 50 to unqie mapping.
+
+The **MAPQ** score is computed as: 
+MAPQ = int(-10*log10(1-1/[N]))
+where N is the number of loci the readmaps to.
+
+### Reporting
+
+**Bowtie2**
+* Default mode: search for multiple alignments, report the best one
+* -k mode: search for one or more alignments, report each
+* -a mode: search for and report all alignments
+
+[Source](http://bowtie-bio.sourceforge.net/bowtie2/manual.shtml#reporting)
+
+**STAR**
+See chapters 8.9 - 8.14 in [manual](http://labshare.cshl.edu/shares/gingeraslab/www-data/dobin/STAR/STAR.posix/doc/STARmanual.pdf)
+
+**TopHat2**
+* --report-secondary-alignments
+* --no-discordan
+* --no-mixed
+
+and potentially more as described in [manual](https://ccb.jhu.edu/software/tophat/manual.shtml)
+
+**TopHat2**
+
+## Mapping with R
+
+Use the Rsubread package to map a read file found at http://fgcz-gstore.uzh.ch/public/Yeast_Reads/
+
+
+```{r, eval=FALSE}
+source("https://bioconductor.org/biocLite.R")
+biocLite("BSgenome.Scerevisiae.UCSC.sacCer3")
+biocLite("TxDb.Scerevisiae.UCSC.sacCer3.sgdGene")
+```
+
+```{r}
+currdir <- getwd()
+new_dir <- paste(currdir, "/tmp/Yeast_example", sep = "")
+setwd(new_dir)
+```
+
+Use the commands *export* to export the genome as a fasta file. Use the commands *buildindex* and *align* to map the reads. Consult the help pages of the respective functions. Build the index so that at most 2GB of RAM is used. Run the alignment with 4 threads. If you computer has less resources, adapt accordingly.
+
+What is the mapping rate of the reads? How does the mapping rate change if you trim 5 bases of both ends?
+
+```{r}
+#setwd(new_dir)
+out_file <- file.path(tempdir(), "yeast.fasta")
+genome <- BSgenome.Scerevisiae.UCSC.sacCer3::Scerevisiae
+BSgenome::export(genome, con = out_file)
+```
+```{r}
+BSgenome::bui
+
+```
+
+```{r}
+# Read the data
+data_reads <- read.csv("http://fgcz-gstore.uzh.ch/public/Yeast_Reads/")
+Rsubread::
+  
+```
+

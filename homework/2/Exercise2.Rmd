@@ -1,7 +1,7 @@
 ---
 title: "Exercise 2"
 author: "Holub Martin"
-date: "01 10 2017"
+date: "03 10 2017"
 output: html_document
 ---
 
@@ -11,7 +11,6 @@ knitr::opts_chunk$set(echo = TRUE)
 
 ## Exploratory Data Analysis
 
-**TASK**
 Do an exploratory data analysis of a matrix of expression values. Load the data and display:
 * distributions: *boxplot*, *density*, *limma::plotDensities*
 * normalization: *limma::normalizeQuantiles*
@@ -19,6 +18,8 @@ Do an exploratory data analysis of a matrix of expression values. Load the data 
 * heatmap: *heatmap.2* or *pheatmap*
 * correlation matrix: *cor* and *image*
 * reduced dimensionality representation: *cmdscale* and *prcomp*
+
+*Note: clustering, heatmap, correlation matrix and reduced dimensionality representation are done along both axes of the data matrix (first all samples then 1000 genes with highest variance).*
 
 
 ## Data Import
@@ -102,7 +103,7 @@ legend("topright", legend = samples, col = colors, lwd = 1, cex = 0.75,
 
 Netx, we look at partitioning of samples to clusters. We observe that sick+acute and normal conditions appear together in respective clusters. Sick_14 appears to be an outlier. We use *1 - cor(x,y)* as a distance metric, as discussed in lecture.
 
-*Note: used method 'Ward's minimum variance' aims at finding compact, spherical clusters.*
+*Note1: used method 'Ward's minimum variance' aims at finding compact, spherical clusters.*
 
 ```{r clust}
 # dist_measure <- as.dist((1-cor(log2(x))))
@@ -129,7 +130,7 @@ gplots::heatmap.2(x_norm, distfun = dist_fun,
                   col = my_palette,
                   trace = "none",
                   scale = "none",
-                  main = "Expression Heatmap")
+                  main = "Per-Sample Expression Heatmap")
 
 # We may also use different functions to obtain similar results
 # pheatmap::pheatmap(x_norm, main = "HeatMap",
@@ -153,7 +154,7 @@ x_corr = cor(log2(x_norm))
 
 ```{r heatmap2}
 image(x=seq(nrow(x_corr)), y=seq(ncol(x_corr)), z=x_corr,
-      main = "correlation matrix", col = cor_palette,
+      main = "Sample-correlation matrix", col = cor_palette,
       xlab = "", ylab = "", axes = F)
 axis(1, at=seq(nrow(x_corr)), labels = samples, las=2)
 axis(2, at=seq(ncol(x_corr)), labels = samples, las=1)
@@ -162,14 +163,14 @@ axis(2, at=seq(ncol(x_corr)), labels = samples, las=1)
 We can also make our lives easier by using dedicated package:
 
 ```{r corrplot}
-corrplot::corrplot(x_corr, title = "Correlation Matrix",
+corrplot::corrplot(x_corr, title = "Sample - Correlation Matrix",
                    method = "color", cl.pos="b")
 ```
 
 Or plotting correlation matrix as a heatmap:
 
 ```{r}
-heatmap(x_corr, main = "Correlation Heatmap", col = cor_palette,
+heatmap(x_corr, main = "Sample-Correlation Heatmap", col = cor_palette,
         distfun = dist_fun)
 ```
 We immediately see that plotting of the correlation matrix can be very deceiving, depending on the scale of the colorspace we use. The correlation values range from `r min(x_corr)` to `r max(x_corr)`, but the first and last shown plot visually suggest much larger differences.Only the second one gives correct representation of correlation values. 
@@ -194,7 +195,7 @@ clusterCols[mycl == 3 ] <- clusterCols_unique[3]
 
 # Do multidimensional scaling
 x_mds <- cmdscale(dist_fun(x_norm), k = 2)
-plot(x_mds, main = "Multi-dimensional scaling of expression levels", col = clusterCols, pch = 16)
+plot(x_mds, main = "Multi-dimensional scaling of Per-sample expression levels", col = clusterCols, pch = 16)
 
 names <- c("norm", "sick", "acute")
 legend("top",legend = names, col = clusterCols_unique, cex = 0.75,
@@ -205,10 +206,10 @@ We see that the samples tend to cluster together according to their condition. T
 
 Next, we find the coordinate transformation that captures the most of the variance in the first dimensions, ie. we use PCA. We than plot the first two principal components.
 
-```{r}
+```{r pca}
 #list[sdev, rotation, x_transformed, center, scale]
 pca_res <- prcomp(x = x_norm, center = TRUE, scale = TRUE)
-plot(pca_res$rotation[,1:2], main = "PCA of expression levels", col = clusterCols, pch = 16)
+plot(pca_res$rotation[,1:2], main = "PCA of Per-sample expression levels", col = clusterCols, pch = 16)
 
 names <- c("norm", "sick", "acute")
 legend("topright",legend = names, col = clusterCols_unique, cex = 0.75,
@@ -220,7 +221,7 @@ Similarly, we observe that samples cluster togetehr according to their condition
 ```{r}
 #list[sdev, rotation, x_transformed, center, scale]
 pca_res <- prcomp(x = x_norm, center = TRUE, scale = TRUE)
-plot(pca_res$rotation[,2:3], main = "PCA of expression levels", col = clusterCols, pch = 16)
+plot(pca_res$rotation[,2:3], main = "PCA of Per-sample expression levels", col = clusterCols, pch = 16)
 
 names <- c("norm", "sick", "acute")
 legend("topright",legend = names, col = clusterCols_unique, cex = 0.75,
@@ -229,10 +230,78 @@ legend("topright",legend = names, col = clusterCols_unique, cex = 0.75,
 
 We may also show how variance explained by each component decreases and see that most of it is captured by first 3 components:
 
-```{r}
+```{r explained_var}
 tot_var = sum(pca_res$sdev)
 explained_var = pca_res$sdev / tot_var * 100
 plot(explained_var, type = 'l', main = 'Variance explained by given PC', xlab = "# of PC", ylab = "% of explained variance")
 ```
 
-This concludes the Homework #2. Thank you for going through this notebook:)
+## Redoing parts of the analysis along gene axes
+
+In the previous parts of the exercise (from [Hiearchical Clustering](#Hiearchical Clustering) onwards) we worked along the "samples" axis of the data. This was because otherwise the computed distance or covariance matrix doesn't fit into our RAM. Now we adress this issue by **taking 1000 genes from available data that have highest variance and analysing these. We also corespondingly transpose the data**.
+
+*Note: we omit the comments as they would only reiterate what was said before.*
+
+```{r clust_genes}
+# Take 1000 rows with most variance
+nv <- apply(x_norm, MARGIN = 1, FUN = var)
+x_norm_sample = head( x_norm[order(nv, decreasing = TRUE),] , 1000 )
+sample_names = head(samples[order(nv, decreasing = TRUE)], 1000 )
+# can also take random 1000
+#indices = sample(nrow(x_norm), 1000)
+# x_norm_sample = x_norm[indices,]
+
+clusters <- hclust(dist_fun(t(x_norm_sample)), method = "ward.D")
+plot(clusters)
+```
+
+
+```{r heatmap_sample}
+my_palette <- colorRampPalette(c("orange", "red"))(n = 100)
+gplots::heatmap.2((x_norm_sample), distfun = dist_fun,
+                  dendrogram = "row",
+                  Rowv = as.dendrogram(clusters), Colv = FALSE,
+                  labCol = "", labRow = sample_names,
+                  density.info="none",
+                  col = my_palette,
+                  trace = "none",
+                  scale = "none",
+                  main = "Expression Heatmap")
+
+```
+```{r corrplot_sample}
+# First, generate some color palette. Later may spend some time to find color-blinded friendly one.
+cor_palette = colorRampPalette(c("white", "blue"))(n = 100)
+
+x_corr = cor(log2(t(x_norm_sample)))
+```
+
+```{r corrplot_sample_plot}
+corrplot::corrplot(x_corr, title = "Correlation Matrix",
+                   method = "color", cl.pos="b", tl.pos="n")
+```
+
+```{r mdds_sample}
+
+# Do multidimensional scaling
+x_mds <- cmdscale(dist_fun(t(x_norm_sample)), k = 2)
+plot(x_mds, main = "Multi-dimensional scaling of expression levels", pch = 16)
+
+
+```
+
+```{r pca_sample}
+pca_res <- prcomp(x = t(x_norm_sample), center = TRUE, scale = TRUE)
+plot(pca_res$rotation[,1:2], main = "PCA of expression levels", pch = 16)
+
+```
+
+```{r explained_var_sample}
+tot_var = sum(pca_res$sdev)
+explained_var = pca_res$sdev / tot_var * 100
+plot(explained_var, type = 'l', main = 'Variance explained by given PC', xlab = "# of PC", ylab = "% of explained variance")
+```
+
+## Conclusion
+
+This concludes homework #2. We have learned how to apply basic data exploratory techniques and used those on dataset of gene expression levels for 3 conditions and 17 samples. We have also brushed up on our R skills.  

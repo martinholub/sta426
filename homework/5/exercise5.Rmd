@@ -1,5 +1,7 @@
 ---
 title: "Exercise for Lecture 5 - Differential expression with the limma package"
+author: "Holub Martin"
+date: "21 10 2017"
 output: html_document
 ---
 
@@ -31,9 +33,12 @@ Note: there are some details regarding the scaled inverse chi-square distributio
 
 #### Question 1. Look at the distribution of "true" s.d. (each gene has a different s.d.).  You will change this distribution later to see effect on differential detection performance.
 
-We look at the distribution and see that it allows for very high values of standard deviation (max: `r max(sd)`, min: `r min(sd)`), this is because chi-squared has support on (0,+ \infty).
+#### Answer 1.
+We look at the distribution and see that it allows for very high values of standard deviation (max: `r max(sd)`, min: `r min(sd)`), this is because chi-squared has support on (0, +\infty). We can also find out that chi-squared is a special case of exponential distribution and thus we will prefer to look at histogram of log-transformed values. We see that the values are centered around zero. There is `r length(sd[sd ==0])` values that are exactly  0. And `r length(sd[sd > 0])` or `r length(sd[sd < 0])` values that are greater or lower than zero. 
+
 ```{r histogram, echo=TRUE}
-hist(sd, breaks = 1000, xlim = range(0,2))
+#hist(sd[sd < (0.9*max(sd))], breaks = 20)
+hist(log(sd), breaks = 50)
 ```
 
 
@@ -53,6 +58,16 @@ y[indD,grp==1] <- y[indD,grp==1] + diff
 ```
 
 #### Question 2. To make sure you understand the simulation, look at some of the rows in the table.  For example, plot the data (e.g., a barplot) for a few rows that are truly differential and a few rows that are non-differential.
+
+#### Answer 2.
+
+We have a table in variable `y` that has `r nGenes` rows and `r nSamples` columns. It's values range from `r min(y)` to `r min(r)`. We will take a closer look at it.
+
+```{r }
+up_thresh <- 4
+upregulated <- y[log2(y) > 4, ]
+low_thresh <- 
+```
 
 Next, we create a design matrix to feed into limma:
 

@@ -1,0 +1,122 @@
+---
+title: "Exercise 4"
+author: "Holub Martin"
+date: "14 10 2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+## Mapping in practice
+
+Check the online available manuals for the mappers
+* bowtie2  
+* tophat2  
+* STAR  
+
+and answer the questions  
+* How do these mappers score alignments?  
+* What reporting options are available?  
+
+### Scoring
+
+**TopHat2** outputs MAPQ scores in the BAM/SAM files with possible values 0, 1, 2, or 50. The first three values indicate mappings to 5, 3-4, or 2 locations, whereas a value of 50 represents a unique match. In previous versions, 50 was replaced by 255. [2](http://www.acgt.me/blog/2015/3/17/more-madness-with-mapq-scores-aka-why-bioinformaticians-hate-poor-and-incomplete-software-documentation)
+
+**Bowtie2** generates MAPQ scores between 0-42 [1](https://sequencing.qcfail.com/articles/mapq-values-are-really-useful-but-their-implementation-is-a-mess/),[2] (http://www.acgt.me/blog/2015/3/17/more-madness-with-mapq-scores-aka-why-bioinformaticians-hate-poor-and-incomplete-software-documentation)
+
+**STAR** uses the same scoring as tophat, i.e. assings 50 to unqie mapping.
+
+The **MAPQ** score is computed as: 
+MAPQ = int(-10*log10(1-1/[N]))
+where N is the number of loci the readmaps to.
+
+### Reporting
+
+**Bowtie2**
+* Default mode: search for multiple alignments, report the best one
+* -k mode: search for one or more alignments, report each
+* -a mode: search for and report all alignments
+
+[Source](http://bowtie-bio.sourceforge.net/bowtie2/manual.shtml#reporting)
+
+**STAR**
+See chapters 8.9 - 8.14 in [manual](http://labshare.cshl.edu/shares/gingeraslab/www-data/dobin/STAR/STAR.posix/doc/STARmanual.pdf)
+
+**TopHat2**
+* --report-secondary-alignments
+* --no-discordan
+* --no-mixed
+
+and potentially more as described in [manual](https://ccb.jhu.edu/software/tophat/manual.shtml)
+
+## Mapping with R
+
+Use the Rsubread package to map a read file found at http://fgcz-gstore.uzh.ch/public/Yeast_Reads/
+
+
+```{r, eval=FALSE}
+# source("https://bioconductor.org/biocLite.R")
+# biocLite("BSgenome.Scerevisiae.UCSC.sacCer3")
+# biocLite("TxDb.Scerevisiae.UCSC.sacCer3.sgdGene")
+```
+
+Use the commands *export* to export the genome as a fasta file. Use the commands *buildindex* and *align* to map the reads. Consult the help pages of the respective functions. Build the index so that at most 2GB of RAM is used. Run the alignment with 4 threads. If you computer has less resources, adapt accordingly.
+
+What is the mapping rate of the reads? How does the mapping rate change if you trim 5 bases of both ends?
+
+## Solution
+
+_Note: During the solution I am working on a PC in a computer room and I have only limited rights to write/store files. I will therefore evaluate the code only on single file. Extension to multiple files is straightforward. Thank you for understanding._
+
+_Note: I will make sure that I install a Linux distro for upcoming exercises as currently the working conditions are suboptimal._
+
+```{r create_dir}
+#currdir <- getwd()
+#new_dir <- paste("home/mholub/Downloads/ex4", "", sep = "")
+new_dir <- "tmp/Rtmpx3RA0Q"
+```
+
+```{r export_reference}
+yeast_genome <- file.path(new_dir, "yeast.fasta")
+genome <- BSgenome.Scerevisiae.UCSC.sacCer3::Scerevisiae
+BSgenome::export(genome, con = yeast_genome)
+```
+
+```{r, eval=FALSE}
+#source("https://bioconductor.org/biocLite.R")
+#biocLite("Rsubread")
+```
+
+```{r build_index}
+index <- file.path(new_dir, "index")
+Rsubread::buildindex("index", yeast_genome, memory=2000)
+```
+
+```{r fastq}
+# Read the data
+# fpath = "/nas/mholub/Downloads"
+fastq.files <- list.files(path = new_dir, pattern = ".fastq.gz$", full.names = TRUE)
+fastq.files
+```
+
+```{r align}
+Rsubread::align("index", fastq.files, type = "rna", nthreads = 4)
+# http://combine-australia.github.io/RNAseq-R/07-rnaseq-day2.html
+```
+
+```{r align_trim}
+Rsubread::align("index", fastq.files, type = "rna", nthreads = 4, nTrim3 = 5, nTrim5 = 5)
+```
+
+When trimming from both ends the mapping rate increases and ranges between 97k and 45k reads per second. Whereas for the untrimmed case the rate was lower (75k - 35k reads per second). Also the precentage of mapped reads increases from 72.5 without trimming to 74.4 with trimming.
+
+## Interogate BAM file properties
+
+```{r}
+bam.files <- list.files(path = new_dir, pattern = ".BAM$", full.names = TRUE)
+props <- Rsubread::propmapped(files=bam.files)
+props
+```

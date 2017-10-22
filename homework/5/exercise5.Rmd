@@ -41,7 +41,6 @@ We look at the distribution and see that it allows for very high values of stand
 hist(log(sd), breaks = 50)
 ```
 
-
 Next, we can generate a table of (null) data:
 
 ```{r}
@@ -64,10 +63,32 @@ y[indD,grp==1] <- y[indD,grp==1] + diff
 We have a table in variable `y` that has `r nGenes` rows and `r nSamples` columns. It's values range from `r min(y)` to `r min(r)`. We will take a closer look at it.
 
 ```{r }
-up_thresh <- 4
-upregulated <- y[log2(y) > 4, ]
-low_thresh <- 
+#upregulated <- y[(y > 3 && y < 20), ]
+#downregulated <- y[y < -3 && y > -20, ]
+# res_up <- vector(mode = "numeric", length = nrow(y))
+# res_down <- vector(mode = "numeric", length = nrow(y))
+
+down_tf <- rep(FALSE, nrow(y))
+up_tf <- rep(FALSE, nrow(y))
+for (row in 1: nrow(y))
+  x0 <- y[row, grp == 0]
+  x1 <- y[row, grp == 1]
+  res_up <- t.test(x0, x1, alternative = "greater")$p.value
+  res_down <- t.test(x0, x1, alternative = "less")$p.value
+  
+  if (res_down < .1){
+    down_tf[row] = TRUE
+  }
+  if (res_up < .1){
+    up_tf[row] = TRUE
+  }
 ```
+
+```{r}
+upregulated = y[up_tf, ]
+downregulated <- y[down_tf, ]
+```
+
 
 Next, we create a design matrix to feed into limma:
 

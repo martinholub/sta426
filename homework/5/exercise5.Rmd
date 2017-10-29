@@ -34,7 +34,7 @@ Note: there are some details regarding the scaled inverse chi-square distributio
 #### Question 1. Look at the distribution of "true" s.d. (each gene has a different s.d.).  You will change this distribution later to see effect on differential detection performance.
 
 #### Answer 1.
-We look at the distribution and see that it allows for very high values of standard deviation (max: `r max(sd)`, min: `r min(sd)`), this is because chi-squared has support on (0, +\infty). We can also find out that chi-squared is a special case of exponential distribution and thus we will prefer to look at histogram of log-transformed values. We see that the values are centered around zero. There is `r length(sd[sd ==0])` values that are exactly  0. And `r length(sd[sd > 0])` or `r length(sd[sd < 0])` values that are greater or lower than zero. 
+We look at the distribution and see that it allows for very high values of standard deviation (max: `r max(sd)`, min: `r min(sd)`), this is because chi-squared has support on (0, +\infty). We can also find out that chi-squared is a special case of exponential distribution and thus we will prefer to look at histogram of log-transformed values. We see that the values are centered around zero which also makes sense. There is `r length(sd[sd ==0])` values that are exactly  0. And `r length(sd[sd > 0])` or `r length(sd[sd < 0])` values that are greater or lower than zero. 
 
 ```{r histogram, echo=TRUE}
 #hist(sd[sd < (0.9*max(sd))], breaks = 20)
@@ -60,35 +60,56 @@ y[indD,grp==1] <- y[indD,grp==1] + diff
 
 #### Answer 2.
 
-We have a table in variable `y` that has `r nGenes` rows and `r nSamples` columns. It's values range from `r min(y)` to `r min(r)`. We will take a closer look at it.
+We have a table in variable `y` that has `r nGenes` rows and `r nSamples` columns. It's values range from `r max(y)` to `r min(y)`. We will decide whether expression of given gene is differnetial among the two samples using two sided t-test on each row. We adopt 0.01 as a threshold level of significance for p-value.
 
-```{r }
-#upregulated <- y[(y > 3 && y < 20), ]
-#downregulated <- y[y < -3 && y > -20, ]
-# res_up <- vector(mode = "numeric", length = nrow(y))
-# res_down <- vector(mode = "numeric", length = nrow(y))
+*Q: What do EXACTLY the values in y represent? Log2-fold-change? If so than compared to what?*
 
+```{r differential}
 down_tf <- rep(FALSE, nrow(y))
 up_tf <- rep(FALSE, nrow(y))
-for (row in 1: nrow(y))
+twosided_tf <- rep(FALSE, nrow(y))
+
+#for (row in 1: nrow(y)){ # do it only where differential expression expected
+for (row in 1: length(indD)){
   x0 <- y[row, grp == 0]
   x1 <- y[row, grp == 1]
   res_up <- t.test(x0, x1, alternative = "greater")$p.value
   res_down <- t.test(x0, x1, alternative = "less")$p.value
+  res_twosided <- t.test(x0, x1, alternative = "two.sided")$p.value 
   
-  if (res_down < .1){
-    down_tf[row] = TRUE
+  if (res_down < .01){
+    down_tf[row] <- TRUE
   }
-  if (res_up < .1){
-    up_tf[row] = TRUE
+  if (res_up < .01){
+    up_tf[row] <- TRUE
   }
+  if (res_twosided < .01){
+    twosided_tf[row] <- TRUE
+  }
+}
 ```
 
-```{r}
-upregulated = y[up_tf, ]
+```{r differential_assign}
+upregulated <- y[up_tf, ]
 downregulated <- y[down_tf, ]
+differential <- y[twosided_tf, ]
+nondifferential <- y[indD, ][! twosided_tf[indD], ]
 ```
 
+```{r barplot}
+# Note for myself: https://plot.ly/r/parallel-coordinates-plot/
+
+gene_ids <- sample(nrow(differential), 1)
+diff_sample <- differential[gene_ids, ]
+par(mfrow = c(2, 1))
+barplot(diff_sample, ylab = "FC", xlab = "sample", axes = TRUE, legend.text = gene_ids, names.arg = grp, main = "Differential")
+
+
+gene_ids <- sample(nrow(nondifferential), 1)
+nondiff_sample <- nondifferential[gene_ids, ]
+barplot(nondiff_sample, ylab = "FC", xlab = "sample", axes = TRUE, legend.text = gene_ids, names.arg = grp, main = "Nondifferential")
+
+```
 
 Next, we create a design matrix to feed into limma:
 
@@ -98,23 +119,48 @@ design <- model.matrix(~grp)
 
 #### Question 3. What is the interpretation of the two columns of this design matrix?
 
+#### Answer 3.
+Column 1 in this design matrix corresponds to  _group0_ and Column 2 represents _group1_. 
+
+We are looking for \alpha giving best fit in $y = X\cdot\alpha + \epsilon$, where $X$ is the design matrix, $\alpha$ is vector of coefficients, $y$ is the observed expression, and $\epsilon$ is vector representing additive noise.
+
+The design matrix is constructed such that $\alpha_1$ will correspond to _group0_ and $\alpha_2$ to _group1_ - _group0_.
+
+**Q: What is interpretation of Intercept??**
+
 Below is a standard limma pipeline.  We will unravel many details of these steps in the coming weeks.
 
 ```{r}
-fit <- lmFit(y,design)
-fit <- eBayes(fit)
+fit <- limma::lmFit(y,design)
+fit <- limma::eBayes(fit, robust = TRUE)
 ```
 
 #### Question 4. For each row in the simulated table, calculate the classical 2-sample t-test (perhaps store the result in a vector named 'classicalt'; see below).  See ?t.test for more details about the built-in R function to do this calculation and convince yourself which arguments to use to match the t-test described in class.
 
+#### Answer 4.
+We adopt the same approach as for [Answer 2.](#Answer 2) and we loop over all rows.
 
+**Q: Shouldn't perhaps use var.equal = TRUE?, paired = TRUE?**
+
+```{r ttest_full}
+classicalt <- vector(mode = "numeric", length = nrow(y))
+classicalt_res <- list()
+data <- list()
+for (row in 1: nrow(y)){
+  x0 <- y[row, grp == 0]
+  x1 <- y[row, grp == 1]
+  classicalt[row] <- t.test(x0, x1, alternative = "two.sided")$statistic
+  classicalt_res <- append(classicalt_res, list(t.test(x0, x1, alternative = "two.sided")))
+}
+```
 Below, a vector of colours is made to signify the true differential "status", which will be used in exploratory plots:
 
 ```{r}
 cols <- rep("black",nrow(y))
 cols[indD] <- "blue"
 
-par(mfrow=c(2,1))
+par(mfrow=c(3,1))
+plot( classicalt, col=cols, ylim=c(-10,10), pch=".", main="Classical-t" )
 plot( fit$t[,2], col=cols, ylim=c(-10,10), pch=".", main="Moderated-t" )
 plot( fit$coef[,2], col=cols, ylim=c(-6,6), pch=".", main="log FC" )
 ```
@@ -122,16 +168,94 @@ plot( fit$coef[,2], col=cols, ylim=c(-6,6), pch=".", main="log FC" )
 
 #### Question 5. Add an exploratory visualization to your plots above, perhaps with a command similar to below.  From this visualization, summarize any differences you see between the three statistical summaries of a change between experimental groups.
 
-```{r eval=FALSE}
-plot( classicalt, col=cols, ylim=c(-10,10), pch=".", main="Classical-t" )
+We can see multiple things:
+
+* First 1000 genes clearly show different distribution pattern of fold-change values. This is expected as we fabricated it.
+* Correspondingly, t-statistics reach higher absolute vaules for these genes and can lead to rejection of null hypothesis if the observed difference in expression pattern is above some significance threshold.
+* Moderate t-statistic appears to be more closely packed around 0, which is in-line with what we would expect as it is regularized by pull to mean value which is in turn governed by majority of 'genes' which expression wasn't manipulated and thus are unlikely to show differential expression. We confirm this visually by plotting density estimate.
+
+``` {r}
+d1 <- density(classicalt[indD], bw ="SJ", kernel= "gauss", na.rm = TRUE)
+d2 <- density(fit$t[indD,2], bw ="SJ", kernel= "gauss", na.rm = TRUE)
+colors_t = c("firebrick3", "dodgerblue4")
+
+#h1 <- hist(classicalt[indD], breaks = 20)
+#h2 <- hist(fit$t[indD,2], breaks = 20)
+#plot( h1, col=colors_t[1], xlim=c(-10,10), main = "Hist of t and t-moderated") 
+#plot( h2, col=colors_t[2], xlim=c(-10,10), add=T)
+
+plot( d1, col=colors_t[1], xlab = "", main = "Kernel Density estimate")
+lines( d2, col=colors_t[2], xlab = "") 
+
+legend("topright", legend = c("t-classical", "t-moderated"), col = colors_t, lwd = 1, cex = 0.75,y.intersp = 0.75, ncol = 1)
 ```
+
 
 
 #### Question 6. Pick a reasonable metric to compare the methods: ROC curve, false discovery plot, power versus achieved FDR.  Using this metric/curve, compare the classical t-test (classicalt), the moderated t-test (fit\$t) and the log-fold-change or mean difference (fit\$coef).  Either manually calculate and plot it or use a nice package for it (e.g., [https://rocr.bioinf.mpi-sb.mpg.de/](the ROCR package) or [https://github.com/markrobinsonuzh/benchmarkR](benchmarkR package))  What method(s) perform well?
 
+**Q:How to pick decision threshold for log2-fold-change to obtain at least similar performance as with the t-test methods? Is there more eleganr way how to evaluate the peroframance?**
+
+#### Answer 6.
+```{r prep}
+p_vals_class <- unlist(lapply(classicalt_res, function (x) x$p.value[[1]]))
+p_vals_mod <- fit$p.value[, 2] # why second column?
+fc_vals <- fit$coef[,2]
+ground_truth <- rep(0, nrow(y))
+ground_truth[1:max(indD)] <- rep(1, max(indD))
+colors_roc = c("firebrick3", "dodgerblue4", "forestgreen")
+```
+
+```{r }
+library(ROCR)
+
+samp_sizes <- seq(2*max(indD), nrow(y), by = 2*length(indD))
+perf_class_container <- list()
+perf_mod_container <- list()
+
+for (it in 5){
+  idxer <- rep(FALSE, nrow(y))
+  samp_size <- samp_sizes[it]
+  idxer[1: samp_size] <- rep(TRUE, samp_size)
+  
+  pred_class <- prediction(1 - p_vals_class[idxer], ground_truth[idxer])
+  pred_mod <- prediction(1 - p_vals_mod[idxer], ground_truth[idxer])
+  pred_fc <- prediction(fc_vals[idxer], ground_truth[idxer]*trueFC)
+  
+  perfc <- performance(pred_class, measure = "tpr", x.measure = "fpr")
+  aucc <- performance(pred_class, measure = "auc")
+  perfm <- performance(pred_mod, measure = "tpr", x.measure = "fpr")
+  aucm <- performance(pred_mod, measure = "auc")
+  perffc <-performance(pred_fc, measure = "tpr", x.measure = "fpr")
+  aucfc <- performance(pred_fc, measure = "auc")
+  
+  #perfc <- sum((p_vals_class[idxer] > thresh)) / samp_size # TP
+  #perfm <- sum((p_vals_mod[idxer] > thresh)) / samp_size # TP
+  
+  #perf_class_container <- append(perf_class_container, perfc)
+  #perf_mod_container <- append(perf_mod_container, perfm)
+  
+  plot(perfc, col = colors_roc[1])
+  abline(a=0, b= 1)
+  plot(perfm, add = TRUE, col = colors_roc[2])
+  plot(perffc, add = TRUE, col = colors_roc[3])
+  
+  leg1 <- sprintf("t-classical, auc = %1.3f", round(unlist(aucc@y.values), 3))
+  leg2 <- sprintf("t-moderated, auc = %1.3f", round(unlist(aucm@y.values), 3))
+  leg3 <- sprintf("t-moderated, auc = %1.3f", round(unlist(aucfc@y.values), 3))
+  legend("bottomright", legend = c(leg1, leg2, leg3), col = colors_roc, lwd = 1, cex = 1,y.intersp = 1, ncol = 1)
+}
+
+#plot(samp_sizes[1:it], ylim = c(0.9, 1.1), perf_class_container, col = "red")
+#points(samp_sizes[1:it], perf_mod_container, col = "blue")
+```
+
+Next we could for example plot similar plots as show in the "LIMMA" paper (# of genes selected vs. # of false discoveries). In outter loop we would draw samples of increasing size and in the inner loop we would sample multiple times to get good statistics. False discovery would be defined as `p.value < 0.05` for a gene from `y_prime` where `y_prime` corresponds to all genes which expression wasn't manipulated.  
 
 
 #### Question 7.  Explore the performance of these test statistics for a few scenarios.  For example, change the sample size, the number of genes DE, magnitude of the difference, level of variability.  What influence do these parameters have on the relative performance? 
 
+#### Answer 7.
+Increasing power of the t-test (more samples, higher logFC, lower variability) leads to performance of classical t-test approaching that of a moderated t-test.
 
 #### Note: Submit both an Rmarkdown/markdown file as well as a compiled HTML file to your private github repository.

@@ -1,0 +1,59 @@
+---
+title: "Exercise 7"
+author: "Hubert Rehrauer"
+date: "30 10 2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+## Comparison of Expression Estimates
+
+The data set consists for 3 Normal samples and 3 Treated samples with 2.5 Mio reads each. The reads are simulated to come from genes on the human chromosome 1.
+
+The expression values from featureCounts were created with:
+We use the library subread to generate the counts
+```{r, eval=FALSE}
+library(Rsubread)
+countResult1 = featureCounts(..., strandSpecific=0,
+                                 GTF.featureType="exon", GTF.attrType="gene_id", useMetaFeatures=TRUE,
+                                 allowMultiOverlap=TRUE, countMultiMappingReads=TRUE)
+save(countResult1, file="countResult1.RData")
+countResult2 = featureCounts(..., strandSpecific=0,
+                                 GTF.featureType="exon", GTF.attrType="gene_id", useMetaFeatures=TRUE,
+                                 allowMultiOverlap=TRUE, countMultiMappingReads=TRUE, fraction=TRUE)
+save(countResult2, file="countResult2.RData")
+```
+
+The RSEM data were generated with
+```{sh, eval=FALSE}
+rsem-calculate-expression .... --calc-pme --calc-ci --strandedness none ...
+```
+For documentation see: http://deweylab.github.io/RSEM/rsem-calculate-expression.html
+
+## Exercises
+
+1. Depending on the featureCount mode, how many alignments are ignored during counting?
+
+* countMultiMappingReads	
+  * logical indicating if multi-mapping reads/fragments should be counted. If TRUE, a multi-mapping read will be counted up to N times if it has N reported mapping locations. This function uses the ???NH??? tag to find multi-mapping reads.
+
+* allowMultiOverlap	
+  * logical indicating if a read is allowed to be assigned to more than one feature (or meta-feature) if it is found to overlap with more than one feature (or meta-feature = gene, as in this case).
+  
+* strandSpecific	
+  * integer indicating if strand-specific read counting should be performed. It has three possible values: 0 (unstranded), 1 (stranded) and 2 (reversely stranded)
+  
+* fraction
+  * logical indicating if fractional counts will be produced for multi-mapping reads. If TRUE, a fractional count, 1/n, will be generated for each reported alignment of a multi-mapping read, where n is the total number of alignments reported for that read. countMultiMappingReads must be set to TRUE when fraction is TRUE
+
+
+2. Compare the counts from featureCounts with the genelevel counts from RSEM. Which genes have different values?
+3. How does the sum of the counts in RSEM compare to the number of the aligned reads?  
+4. Compute pair-wise correlation of the samples based on the isoform counts and gene level counts
+
+
+

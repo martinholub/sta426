@@ -56,34 +56,35 @@ diff <- sample(c(-1,1),max(indD),replace=TRUE)*trueFC
 y[indD,grp==1] <- y[indD,grp==1] + diff
 ```
 
+We note that y matrix holds log2 expression values and that fold change becomes and additive operation in log space. Also, the distribution of the values in y matrix is identical for both groups and we can thus assume equal variances. 
+
 #### Question 2. To make sure you understand the simulation, look at some of the rows in the table.  For example, plot the data (e.g., a barplot) for a few rows that are truly differential and a few rows that are non-differential.
 
 #### Answer 2.
 
-We have a table in variable `y` that has `r nGenes` rows and `r nSamples` columns. It's values range from `r max(y)` to `r min(y)`. We will decide whether expression of given gene is differnetial among the two samples using two sided t-test on each row. We adopt 0.01 as a threshold level of significance for p-value.
+We have a table in variable `y` that has `r nGenes` rows and `r nSamples` columns. It's values range from `r max(y)` to `r min(y)`. We will decide whether expression of given gene is differnetial among the two samples using two sided t-test on each row. We adopt 0.01 or 0.05 as a threshold level of significance for p-value.
 
-*Q: What do EXACTLY the values in y represent? Log2-fold-change? If so than compared to what?*
 
 ```{r differential}
 down_tf <- rep(FALSE, nrow(y))
 up_tf <- rep(FALSE, nrow(y))
 twosided_tf <- rep(FALSE, nrow(y))
 
-#for (row in 1: nrow(y)){ # do it only where differential expression expected
-for (row in 1: length(indD)){
+for (row in 1: nrow(y)){ # do it only where differential expression expected
+#for (row in 1: length(indD)){
   x0 <- y[row, grp == 0]
   x1 <- y[row, grp == 1]
-  res_up <- t.test(x0, x1, alternative = "greater")$p.value
-  res_down <- t.test(x0, x1, alternative = "less")$p.value
-  res_twosided <- t.test(x0, x1, alternative = "two.sided")$p.value 
+  res_up <- t.test(x0, x1, alternative = "greater", var.equal = TRUE)$p.value
+  res_down <- t.test(x0, x1, alternative = "less", var.equal = TRUE)$p.value
+  res_twosided <- t.test(x0, x1, alternative = "two.sided", var.equal = TRUE)$p.value 
   
-  if (res_down < .01){
+  if (res_down < .05){
     down_tf[row] <- TRUE
   }
-  if (res_up < .01){
+  if (res_up < .05){
     up_tf[row] <- TRUE
   }
-  if (res_twosided < .01){
+  if (res_twosided < .05){
     twosided_tf[row] <- TRUE
   }
 }
@@ -93,7 +94,7 @@ for (row in 1: length(indD)){
 upregulated <- y[up_tf, ]
 downregulated <- y[down_tf, ]
 differential <- y[twosided_tf, ]
-nondifferential <- y[indD, ][! twosided_tf[indD], ]
+nondifferential <- y[! twosided_tf[indD], ]
 ```
 
 ```{r barplot}
@@ -138,9 +139,7 @@ fit <- limma::eBayes(fit, robust = TRUE)
 #### Question 4. For each row in the simulated table, calculate the classical 2-sample t-test (perhaps store the result in a vector named 'classicalt'; see below).  See ?t.test for more details about the built-in R function to do this calculation and convince yourself which arguments to use to match the t-test described in class.
 
 #### Answer 4.
-We adopt the same approach as for [Answer 2.](#Answer 2) and we loop over all rows.
-
-**Q: Shouldn't perhaps use var.equal = TRUE?, paired = TRUE?**
+We adopt the same approach as for [Answer 2.](#Answer 2) and we loop over all rows. We recall that groups come originally from same distribution and addition of `diff` factor didn't change the variance, therefore we assume variances equal between samples
 
 ```{r ttest_full}
 classicalt <- vector(mode = "numeric", length = nrow(y))
@@ -149,8 +148,8 @@ data <- list()
 for (row in 1: nrow(y)){
   x0 <- y[row, grp == 0]
   x1 <- y[row, grp == 1]
-  classicalt[row] <- t.test(x0, x1, alternative = "two.sided")$statistic
-  classicalt_res <- append(classicalt_res, list(t.test(x0, x1, alternative = "two.sided")))
+  classicalt[row] <- t.test(x0, x1, alternative = "two.sided", var.equal = TRUE)$statistic
+  classicalt_res <- append(classicalt_res, list(t.test(x0, x1, alternative = "two.sided", var.equal = TRUE)))
 }
 ```
 Below, a vector of colours is made to signify the true differential "status", which will be used in exploratory plots:
@@ -190,8 +189,6 @@ lines( d2, col=colors_t[2], xlab = "")
 legend("topright", legend = c("t-classical", "t-moderated"), col = colors_t, lwd = 1, cex = 0.75,y.intersp = 0.75, ncol = 1)
 ```
 
-
-
 #### Question 6. Pick a reasonable metric to compare the methods: ROC curve, false discovery plot, power versus achieved FDR.  Using this metric/curve, compare the classical t-test (classicalt), the moderated t-test (fit\$t) and the log-fold-change or mean difference (fit\$coef).  Either manually calculate and plot it or use a nice package for it (e.g., [https://rocr.bioinf.mpi-sb.mpg.de/](the ROCR package) or [https://github.com/markrobinsonuzh/benchmarkR](benchmarkR package))  What method(s) perform well?
 
 **Q:How to pick decision threshold for log2-fold-change to obtain at least similar performance as with the t-test methods? Is there more eleganr way how to evaluate the peroframance?**
@@ -200,7 +197,7 @@ legend("topright", legend = c("t-classical", "t-moderated"), col = colors_t, lwd
 ```{r prep}
 p_vals_class <- unlist(lapply(classicalt_res, function (x) x$p.value[[1]]))
 p_vals_mod <- fit$p.value[, 2] # why second column?
-fc_vals <- fit$coef[,2]
+fc_vals <- abs(fit$coef[, 1] - fit$coef[, 2])
 ground_truth <- rep(0, nrow(y))
 ground_truth[1:max(indD)] <- rep(1, max(indD))
 colors_roc = c("firebrick3", "dodgerblue4", "forestgreen")
@@ -242,7 +239,7 @@ for (it in 5){
   
   leg1 <- sprintf("t-classical, auc = %1.3f", round(unlist(aucc@y.values), 3))
   leg2 <- sprintf("t-moderated, auc = %1.3f", round(unlist(aucm@y.values), 3))
-  leg3 <- sprintf("t-moderated, auc = %1.3f", round(unlist(aucfc@y.values), 3))
+  leg3 <- sprintf("log2-fold change, auc = %1.3f", round(unlist(aucfc@y.values), 3))
   legend("bottomright", legend = c(leg1, leg2, leg3), col = colors_roc, lwd = 1, cex = 1,y.intersp = 1, ncol = 1)
 }
 

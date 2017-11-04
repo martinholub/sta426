@@ -100,7 +100,7 @@ It is also recommended to look at the data that goes into the statistical test i
 ```{r}
 barplot( exprs(eset)["910_at",], las=2, cex.names=.7 )  # top gene
 ```
-*This gene shows lowest p.value for the "present10-absent10" contrast. These are the first 4 bars in the plot and we can visually confirm that the logFC values are indeed different. We may plot some other random gene and check whether the difference (between the frist two column pairs) decreases.*
+*This gene shows lowest p.value for the "present10-absent10" (or alternativelly "present48-absent48") contrast. We can visually confirm that the corresponding logFC values are indeed different. We may plot some other random gene and check whether the difference (between the frist two column pairs) decreases.*
 
 ```{r}
 barplot( exprs(eset)["AFFX-CreX-5_at",], las=2, cex.names=.7 )  # top gene in time
@@ -111,7 +111,7 @@ barplot( exprs(eset)["AFFX-CreX-5_at",], las=2, cex.names=.7 )  # top gene in ti
 
 Important side note: if you experiment is sufficiently simple (e.g., a 1-way design), you may not need a contrast matrix at all; the differential expression of interest can be defined through column(s) of the design matrix (see discussion in the lecture notes).
 
-*Q: How to manually compute log2FC?*
+*It is critical to note that the values in fit$coeffs object are already in log2space!*
 
 ```{r}
 #solve overdetermined system of linear equations with some highly DF gene
@@ -119,7 +119,7 @@ Important side note: if you experiment is sufficiently simple (e.g., a 1-way des
 
 gnames<- paste(targets$estrogen,targets$time.h,sep="")
 
-# We look at differences in time
+# We look at some top differentially expressed gene from either E10, E48 or Time contrasts.
 coeffs <- qr.solve(design, eset@assayData$exprs["910_at", ])
 aver_exprs <- mean(coeffs)
 aver_exprs # OK
@@ -127,13 +127,9 @@ aver_exprs # OK
 # https://en.wikipedia.org/wiki/Fold_change
 # Find foldchanges and log fold changes
 
-fc_ab <- (coeffs["absent48"]) / coeffs["present48"]
-logfc_ab <-mean(log2(coeffs["absent48"])) - mean(log2(coeffs["present48"]))
-fc_ab
-logfc_ab # Not OK
-round(logfc_ab, 3) == round(log2(fc_ab), 3)
-
-#mean(log2(eset@assayData$exprs[, c("high48-1.cel", "high48-2.cel" )]))
+# Note that coeffs are alrady in log2space!
+logfc_ab <-mean((coeffs["present48"])) - mean((coeffs["absent48"]))
+logfc_ab # OK
 ```
 
 #### Question 2. Create a Venn diagram summarizing the numbers of  differential genes for the 3 contrasts defined above 'E10', 'E48' and 'Time'.  Hint: use the decideTests() and vennDiagram() functions in limma (you can use default settings).  If you need more help using these functions, try: ?decideTests, ?vennDiagram
@@ -146,27 +142,8 @@ limma::vennDiagram(test_res, include = "both")
  
 #### Question 3. Try to reproduce the above limma modeling using an **alternative design matrix** (remember, it's the combination of a design matrix and a contrast matrix).  Hint: use the experimental factors defined in the 'targets' data frame.
 
-##### Old Stuff:
-> design
-  absent10 absent48 present10 present48
-1        1        0         0         0
-2        1        0         0         0
-3        0        0         1         0
-4        0        0         1         0
-5        0        1         0         0
-6        0        1         0         0
-7        0        0         0         1
-8        0        0         0         1
-
-> cont.matrix
-           Contrasts
-Levels      E10 E48 Time
-  absent10   -1   0   -1
-  absent48    0  -1    1
-  present10   1   0    0
-  present48   0   1    0
   
-##### New stuff: 
+### Answer3: 
 ```{r}
 # do the limma modeling
 f <- paste(targets$estrogen,targets$time.h,sep="")
@@ -189,7 +166,7 @@ cont.matrix2
 ``` {r}
 fit4  <- limma::contrasts.fit(fit3, cont.matrix2)
 fit4  <- limma::eBayes(fit4, robust = TRUE) # use robust LinReg to deal with outliers
-fit4
+#fit4
 
 limma::topTable(fit4,coef=1)
 limma::topTable(fit4,coef=2)

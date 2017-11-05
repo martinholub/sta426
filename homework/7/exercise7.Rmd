@@ -34,26 +34,178 @@ rsem-calculate-expression .... --calc-pme --calc-ci --strandedness none ...
 ```
 For documentation see: http://deweylab.github.io/RSEM/rsem-calculate-expression.html
 
+--calc-pme ... Run RSEM's collapsed Gibbs sampler to calculate posterior mean estimates
+--calc-ci ... Calculate 95% credibility intervals and posterior mean estimate
+?? --strand-specific ... The RNA-Seq protocol used to generate the reads is strand specific, i.e., all (upstream) reads are derived from the forward strand. The '--norc' Bowtie/Bowtie 2 option will be used, which disables alignment to the reverse strand of transcripts
+
 ## Exercises
 
-1. Depending on the featureCount mode, how many alignments are ignored during counting?
+### 1. Depending on the featureCount mode, how many alignments are ignored during counting?
 
-* countMultiMappingReads	
-  * logical indicating if multi-mapping reads/fragments should be counted. If TRUE, a multi-mapping read will be counted up to N times if it has N reported mapping locations. This function uses the ???NH??? tag to find multi-mapping reads.
+**See numeric ratios included with answer to Q2.**
 
-* allowMultiOverlap	
+##### countMultiMappingReads	
+  * logical indicating if multi-mapping reads/fragments should be counted. If TRUE, a multi-mapping read will be counted up to N times if it has N reported mapping locations. This function uses the 'NH' tag to find multi-mapping reads.
+
+##### allowMultiOverlap	
   * logical indicating if a read is allowed to be assigned to more than one feature (or meta-feature) if it is found to overlap with more than one feature (or meta-feature = gene, as in this case).
   
-* strandSpecific	
+##### strandSpecific	
   * integer indicating if strand-specific read counting should be performed. It has three possible values: 0 (unstranded), 1 (stranded) and 2 (reversely stranded)
   
-* fraction
+##### fraction
   * logical indicating if fractional counts will be produced for multi-mapping reads. If TRUE, a fractional count, 1/n, will be generated for each reported alignment of a multi-mapping read, where n is the total number of alignments reported for that read. countMultiMappingReads must be set to TRUE when fraction is TRUE
 
 
-2. Compare the counts from featureCounts with the genelevel counts from RSEM. Which genes have different values?
-3. How does the sum of the counts in RSEM compare to the number of the aligned reads?  
-4. Compute pair-wise correlation of the samples based on the isoform counts and gene level counts
+### 2. Compare the counts from featureCounts with the genelevel counts from RSEM. Which genes have different values?
+
+```{r helper}
+loadRData <- function(fileName){
+#loads an RData file, and returns it
+    load(fileName)
+    get(ls()[ls() != "fileName"])
+}
+```
+
+**STAR was used for alignement**
+
+```{r loadFeatureCounts}
+feature_counts <- loadRData("countResult1.RData")
+# strandSpecific=0, GTF.featureType="exon", GTF.attrType="gene_id", useMetaFeatures=TRUE, allowMultiOverlap=TRUE, countMultiMappingReads=TRUE
+indexing <- factor(feature_counts$annotation$GeneID)
+colnames(feature_counts$counts) <- gsub(".*\\.([NT][0-9])\\..*","\\1", colnames(feature_counts$counts))
+
+feature_counts_frac <- loadRData("countResult2.RData")
+# strandSpecific=0, GTF.featureType="exon", GTF.attrType="gene_id", useMetaFeatures=TRUE, allowMultiOverlap=TRUE, countMultiMappingReads=TRUE, fraction=TRUE
+# check ordering
+colnames(feature_counts_frac$counts) <- gsub(".*\\.([NT][0-9])\\..*","\\1", colnames(feature_counts_frac$counts))
+
+sum(indexing == factor(feature_counts_frac$annotation$GeneID)) == dim(feature_counts$counts)[1]
+```
+
+``` {r ignored_alignements}
+unassigned_frac <- (feature_counts_frac$stat[startsWith(feature_counts_frac$stat$Status, "Unassigned"), 2: ncol(feature_counts_frac$stat)])
+assigned_frac <- (feature_counts_frac$stat[startsWith(feature_counts_frac$stat$Status, "Assigned"), 2: ncol(feature_counts_frac$stat)])
+sum(unassigned_frac) / sum(assigned_frac)
+
+unassigned <- (feature_counts$stat[startsWith(feature_counts$stat$Status, "Unassigned"), 2: ncol(feature_counts$stat)])
+assigned <- (feature_counts$stat[startsWith(feature_counts$stat$Status, "Assigned"), 2: ncol(feature_counts$stat)])
+sum(unassigned) / sum(assigned)
+```
+
+**Bowtie was used for alignement**
+
+```{r loadRSEM_genes}
+rsem.files <- list.files(path = "RSEM_counts/", pattern = ".genes.results$", full.names = TRUE)
+ncols <- length(rsem.files)
+nrows <- length(indexing)
+rsem_gene_counts <- matrix(NA, nrows, ncols, dimnames = list(indexing, 1:ncols))
+
+for (i in 1:length(rsem.files)){
+  rsem <- read.table(rsem.files[i], sep="\t", header=TRUE)
+  
+  names <- rsem$gene_id
+  counts <- rsem$expected_count #rsem[, c("gene_id", "expected_count")]
+  ordering <- match(indexing, names)
+  counts <- counts[ordering]
+  
+  col_name <- gsub(".*/([NT][0-9])\\..*","\\1", rsem.files[i])
+  colnames(rsem_gene_counts)[i] <- col_name
+  
+  rsem_gene_counts[ ,i] <- counts  
+}
+```
+
+``` {r t-test}
+twosided_tf <- rep(FALSE, nrow(rsem_gene_counts))
+p_vals <- vector(mode = "numeric", length =  nrow(rsem_gene_counts))
+
+for (row in 1: nrow(rsem_gene_counts)){
+  x0 <- rsem_gene_counts[row, ]
+  x1 <- feature_counts$counts[row, ]
+  res_twosided <- t.test(x0, x1, alternative = "two.sided")$p.value
+  
+  if (is.nan(res_twosided)){
+    res_twosided <- 1 # rows are identical
+  }
+  if (res_twosided < .05){
+    twosided_tf[row] <- TRUE
+  }
+  p_vals[row] <- res_twosided
+}
+ 
+# t.res <- apply(cbind(rsem_gene_counts, feature_counts$counts), 1, function(x) t.test(x[1:6], x[7:12], alternative = "two.sided"))
+# p_vals <- unlist(lapply(t.res, function(x) x$p.value))
+# p_vals[is.nan(p_vals)] <- 1 # identical entries
+# sum((p_vals < 0.05) == twosided_tf) == nrow(rsem_gene_counts) # check that approaches equivalent
+```
+
+``` {r compare}
+different_genes <- row.names(rsem_gene_counts)[p_vals < .01]
+#different_genes
+length(different_genes)
+```
+
+### 3. How does the sum of the counts in RSEM compare to the number of the aligned reads?  
+
+'expected_count' is the sum of the posterior probability of each read comes from this transcript over all reads. Because 1) each read aligning to this transcript has a probability of being generated from background noise; 2) RSEM may filter some alignable low quality reads, the sum of expected counts for all transcript are generally less than the total number of reads aligned.
+
+```{r rsem_counts_alignements}
+# see https://github.com/deweylab/RSEM/blob/master/cnt_file_description.txt
+
+rsem.files <- list.files(path = "RSEM_counts/", pattern = ".cnt$", full.names = TRUE, recursive = TRUE)
+
+num_total <- vector(mode = "numeric", length = length(rsem.files))
+num_aligned <- vector(mode = "numeric", length = length(rsem.files))
+num_unaligned <- vector(mode = "numeric", length = length(rsem.files))
+
+for (i in 1:length(rsem.files)){
+  rsem.cnts <- read.table(rsem.files[i], sep="", header=FALSE, nrows = 1)
+  num_total[i] <- rsem.cnts[ , 4]
+  num_aligned[i] <- rsem.cnts[ , 2]
+  num_unaligned[i] <- rsem.cnts[ , 1] + rsem.cnts[ , 3]
+}
+sum(num_unaligned) / sum(num_aligned)
+#sum(num_unaligned) / sum(rsem_gene_counts)
+```
+
+
+### 4. Compute pair-wise correlation of the samples based on the isoform counts and gene level counts
+``` {r loadRSEM_isoforms}
+rsem.files <- list.files(path = "RSEM_counts/", pattern = ".isoforms.results$", full.names = TRUE)
+
+for (i in 1:length(rsem.files)){
+  rsem <- read.table(rsem.files[i], sep="\t", header=TRUE)
+  
+  names <- rsem$gene_id
+  names_isof <- rsem$transcript_id
+  counts <- rsem$expected_count
+  
+  #ordering <- match(indexing, names) # not needed now
+  #counts <- counts[ordering]
+  
+  if (i == 1){
+    rsem_isof_counts <- matrix(NA, length(names), ncols, dimnames = list(names_isof, 1:ncols))
+  }
+  
+  col_name <- gsub(".*/([NT][0-9])\\..*","\\1", rsem.files[i])
+  colnames(rsem_isof_counts)[i] <- col_name
+  
+  rsem_isof_counts[ ,i] <- counts  
+}
+```
+
+```{r correlation}
+cor_genes <- cor(rsem_gene_counts, use = "pairwise")
+cor_isof <- cor(rsem_isof_counts, use = "pairwise")
+
+par(mfrow=c(1,2))
+corrplot::corrplot(cor_genes, method = "circle", cl.pos="r")
+title("Genes - Samples Correlations", line = -0.5)
+
+corrplot::corrplot(cor_isof, method = "circle", cl.pos="r")
+title("Isoforms - Samples Correlations", line = -0.5)
+```
 
 
 

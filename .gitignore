@@ -2,3 +2,5 @@ tmp/*
 *.RData
 .*zip
 affy_estrogen/*
+RSEM_counts/*
+project/*.txt

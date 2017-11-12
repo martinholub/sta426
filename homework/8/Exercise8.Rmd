@@ -1,6 +1,8 @@
 ---
 title: "Exercise 8: differential expression with count data"
 output: html_document
+author: Martin Holub
+date: 15/11/2017
 ---
 
 In this exercise, we will explore two popular pipelines for differential expression of RNA-seq data, (already) given the counts.  Details on the counting and/or of the transcript abundance estimation were covered in the last lecture from Hubert and more details will be given in Charlotte's RNA-seq session.  The dataset used here is the well-known 'pasilla' data, which compares the knockout of pasilla (a splicing factor) to a wild-type control.
@@ -33,7 +35,7 @@ grp
 Below is a pipeline using likelihood-ratio tests that is adapted from Quick Start section, early in the [edgeR user's guide](http://bioconductor.org/packages/release/bioc/vignettes/edgeR/inst/doc/edgeRUsersGuide.pdf)
 
 
-```{r eval=FALSE}
+```{r}
 group <- factor(grp)
 y <- edgeR::DGEList(counts=counts, group=group) 
 y <- edgeR::calcNormFactors(y, method = "TMM") # adjust for different sizes of libraries
@@ -51,7 +53,7 @@ This will lead you to a list of putative/detected differentially expressed genes
 #### Exercise 1: Fix the code above to work on the count table that was already read in.  Add in some spot checks, including an MDS plot from plotMDS(), a look at the dispersion-mean plot using plotBCV() and a look at the overall M vs A plot using plotSmear().
 
 
-``` {r plotMDS}
+``` {r plots}
 limma::plotMDS(lrt$fitted.values)
 edgeR::plotBCV(y) # counts per million
 # subpopulations with different variance can be seen, lowess regression
@@ -63,13 +65,48 @@ For more details, see Section 15.5 Differential expression of the [limma user's 
 
 #### Exercise 2: For the MDS plot, investigate what happens differently when you call plotMDS() on the DGEList object and when you call it on the normalized counts -- for normalized counts, see the cpm() function.  Explain why it is different.
 
+``` {r MDS}
+limma::plotMDS(lrt$fitted.values)
+limma::plotMDS(y$counts)
+limma::plotMDS(edgeR::cpm(y$counts))
+```
+
+Samples become linearly separable in the reduced two dimensonal MDS space for normalized counts.
+
 As an alternative (to edgeR above), one can run through a standard voom pipeline, such as:
 
-```{r eval=FALSE}
-v <- voom(d$counts, design=model.matrix(~grp), plot = TRUE)
-vf = lmFit(v, design = model.matrix(~grp))  # note similarity to limma
+```{r}
+v <- limma::voom(y$counts, design=design, plot = TRUE)
+vf = limma::lmFit(v, design = design)  # note similarity to limma
                                             # analysis performed earlier
-vf = eBayes(vf)
+vf = limma::eBayes(vf)
 ```
 
 #### Exercise 3. Again, the above code for voom is not run here.  Fix this code to work with the count dataset above and then do some ``spot checks'' of the genes called DE.  For example, make a plot of the plot of estimated fold changes for the two methods, compare the P-values of the two methods, or create a venn diagram of the called sets of DE genes at a set threshold.
+
+``` {r}
+test_res <- limma::decideTests(vf, method = "separate", p.value = 0.05, lfc = 0)
+# An object of class TestResults. This is essentially a numeric matrix with elements -1, 0 or 1 depending on whether each t-statistic is classified as significantly negative, not significant or significantly positive.
+limma::vennDiagram(test_res, include = "both")
+```
+
+``` {r}
+limma::topTable(vf, coef = 2)
+# for comparison
+edgeR::topTags(lrt) 
+```
+
+
+```{r}
+par(mfrow=c(1,2))
+vf_table <- topTable(vf, coef = 2, n=Inf)
+hist(lrt$table$logFC, breaks = 50)
+hist(vf_table$logFC, breaks = 50)
+```
+
+```{r}
+par(mfrow=c(1,2))
+vf_table <- topTable(vf, coef = 2, n=Inf)
+hist(lrt$table$PValue, breaks = 50)
+hist(vf_table$adj.P.Val, breaks = 50)
+```

@@ -4,3 +4,5 @@ tmp/*
 affy_estrogen/*
 RSEM_counts/*
 project/*.txt
+homework/8/data/*
+*.Rhistory

@@ -1,9 +1,12 @@
 ---
 title: "RNA-seq example workflow"
-output: 
+output:
   html_document:
-    toc: true
+    toc: yes
     toc_depth: 3
+  pdf_document:
+    toc: yes
+    toc_depth: '3'
 ---
 
 In this document we will go through an entire RNA-seq analysis workflow, from

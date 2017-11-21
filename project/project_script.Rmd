@@ -1,5 +1,5 @@
 ---
-title: "sahtgtd_project"
+title: "SAOHTGTD_project/EX8"
 author: "Martin Holub"
 date: "November 5, 2017"
 output: html_document
@@ -64,4 +64,28 @@ mouse.rtsne <- Rtsne::Rtsne(mouse.pca$rotation, pca = FALSE, perplexity = 100, m
 plot(mouse.rtsne$Y, col = mouse.anno$ClusterID)
 ```
 
+## We start once again and this time try to reproduce the steps that lead from raw to preprocessed data
+
+``` {r paths}
+data_dir <- "/home/mholub/dronc_seq_temp/input"
+output_dir <- "/home/mholub/dronc_seq_temp/output"
+```
+
+``` {r inspect}
+fastq.files <- list.files(path = data_dir, pattern = ".fastq$", full.names = TRUE)
+fastq.files
+(cmd <- sprintf("head %s", fastq.files[1]))
+system(cmd)
+```
+
+```{r QC}
+path_to_fastqc <- "/home/mholub/Software/FastQC/fastqc"
+system(sprintf("mkdir -p %s/qc", output_dir))
+
+(cmd <- sprintf("%s -o %s/qc %s", 
+                path_to_fastqc,
+                output_dir,
+                fastq.files[1]))
+system(cmd)
+```
 

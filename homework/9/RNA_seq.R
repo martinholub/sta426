@@ -11,6 +11,8 @@
 # module load new gcc/4.8.2 r/3.4.0
 # module load gcc/4.8.2 star/2.4.2a
 # bsub <script_file> -W 120 -n 8 -R "rusage[mem=4096]"
+# bsub W 120 -n 8 -R "rusage[mem=4096]" "R --vanilla --slave < RNA_seq.R > result.out"
+#
 # wget "ftp://ftp.ensembl.org/pub/release-90/fasta/mus_musculus/dna/Mus_musculus.GRCm38.dna.alt.fa.gz"
 # wget "ftp://ftp.ensembl.org/pub/release-90/gtf/mus_musculus/Mus_musculus.GRCm38.90.gtf.gz"
 # wget "ftp://ftp.ensembl.org/pub/release-90/fasta/mus_musculus/cdna/Mus_musculus.GRCm38.cdna.all.fa.gz"

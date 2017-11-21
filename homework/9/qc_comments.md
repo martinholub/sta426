@@ -1,7 +1,7 @@
 ## Exercise 9
 Author: Martin Holub
 
----
+----
 
 ## Asssignement 1 - FASTQC
 ### Basic Statistics
@@ -46,8 +46,14 @@ Author: Martin Holub
 ### Kmer Content
   * Multiple 7-mers with positionally bias reported
 
----
+----
+
 ## Asssignement 2 - Salmon
 QC check has been performed on RNA-Seq data from archived mouse brain samples. The raw data for the whole study (~110 GB zipped) can be downloaed [here](https://portals.broadinstitute.org/single_cell/study/dronc-seq-single-nucleus-rna-seq-on-mouse-archived-brain)
 
 Here I closely approach presented in the lecture. I use RNA-Seq data that I eventually want to use for my project. As the raw files are rather big, and my NTB not so performant, I run the code on cluster. This is more or less just a mock example and I work only with 2 files. Eventually I would like to wrapt the code to a shell script such that I can process all files I have. I will later also use STAR for alignement.
+
+----
+
+## Notes
+If you, after looking at the correspodning code, realize that you may have some batch script you normally use to work with big raw data. I would be very happy if you share it with me as it may be helpful for my project. Thank you.!

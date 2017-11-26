@@ -48,7 +48,6 @@ lrt <- edgeR::glmLRT(fit,coef=2) # DGELRT-class
 edgeR::topTags(lrt) 
 ```
 
-This will lead you to a list of putative/detected differentially expressed genes.  Note that the code above is just an example and is not actually run in the script.
 
 #### Exercise 1: Fix the code above to work on the count table that was already read in.  Add in some spot checks, including an MDS plot from plotMDS(), a look at the dispersion-mean plot using plotBCV() and a look at the overall M vs A plot using plotSmear().
 

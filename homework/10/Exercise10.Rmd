@@ -1,0 +1,203 @@
+---
+title: "Exercise 10: Adjusting for a batch/technical effect + differential exon usage"
+output: html_document
+author: Martin Holub
+date: 15/11/2017
+---
+
+In the first part of this exercise, we will revisit the analysis from Exercise 8 (pasilla dataset), to account for a covariate.  In the second part, we will use (preprocessed) exon-level counts to look for changes in splicing.
+
+```{r read&count}
+samples <- read.table("data/samples.txt", header=TRUE,
+                      row.names=5, stringsAsFactors=FALSE)
+counts <- edgeR::readDGE(samples$countfile, path = "data/")$counts
+# remove some rows that are not features
+counts <- counts[ grep("^FBgn",rownames(counts)), ]
+
+grp <- gsub("\\-.[0-9]*","",colnames(counts))
+grp
+```
+
+#### Exercise 1. Take the data from Exercise 8 and produce an MDS plot again, but this time colour the points according to the covariate in the samples table: libtype (SE = single end, PE = paired end); perhaps also label the points on the MDS plot using the 'shortname' column to make them easy to distinguish.  Comment on the organization of the samples.
+
+#### Answer 1.:
+
+In the MDS plot we observe clustering of samples based on 1) treatement (or absence thereof) and 2) library type (SE = single end, PE = paired end). In the following code we will look at what does the difference between paired and single end reads stem from in temrs of available data.
+
+
+``` {r estimate&test}
+group <- factor(grp)
+y <- edgeR::DGEList(counts=counts, group=group) 
+y <- edgeR::calcNormFactors(y, method = "TMM") # adjust for different sizes of libraries
+design <- model.matrix(~group)
+y <- edgeR::estimateDisp(y,design) # estimate common, trended and tagwise dispersion
+# Perform likelihood ratio tests:
+fit <- edgeR::glmFit(y,design)
+lrt <- edgeR::glmLRT(fit,coef=2) # DGELRT-class
+edgeR::topTags(lrt) # OK, same as in EX8
+```
+
+``` {r plot}
+# Prepare colors
+farbs <- rep('firebrick3', length(samples$libtype))
+farbs[samples$libtype == 'SE'] <- 'dodgerblue4'
+
+# Prepare annotation C/T and SE/PE
+conds <- rep('C.', length(samples$condition))
+conds[samples$condition == "T"] <- "T."
+conds <- paste0(conds, samples$libtype)
+
+limma::plotMDS(y, labels =  conds, col = farbs, main = "limma:plotMDS")
+```
+
+#### Exercise 2. Put a factor variable for the 'libtype' covariate in the design matrix and redo the edgeR or limma analysis from Exercise 8 (i.e., include also the biological factor, knockout state, in the design matrix).  Compare the set of genes called DE from last week's exercise (i.e., without accounting for the covariate) to this new analysis.  Identify and plot (normalized) expression levels of a gene that is affected solely by library type.
+
+#### Answer2:
+
+* I am unclear on `include also the biological factor, knockout state`, but from the previous I understand it as refining the groups by including information on whether the data was acquired as SE or PE. *
+
+Morover, I came up with multiple ways how to define the contrasts and it feels that multiple are applicable in this case. In this script, I do the analysis twice. Once to check for differences between SE/PE respecting C/T difference and second the same way as before (Exercise8), to see differences just between C/T. I then look for genes that are differentially expressed in the first case but not found in the second scenario.
+
+``` {r design&contrasts}
+conds <- factor(conds)
+design <- model.matrix(~ 0 + conds)
+colnames(design) <- levels(conds)
+design
+
+# libtype <- factor(samples$libtype)
+# design <- model.matrix(~ 0 + libtype)
+# colnames(design) <- levels(libtype)
+# design
+
+cont.matrix <- limma::makeContrasts( # Multiple ways how to define conttrasts
+                                    #CP_SE="C.PE-C.SE",
+                                    CSE_TPE = "C.SE-T.PE",
+                                    CPE_TSE = "C.PE-T.SE",
+                                    CSE_TSE = "C.SE-T.SE",
+                                    CPE_TPE = "C.PE-T.PE",
+                                    #TP_SE="T.PE-T.SE",
+                                    #PE_SE="(C.PE+T.PE)-(C.SE+T.SE)",
+                                    #C_T  = "(C.PE+C.SE)-(T.PE+T.SE)",
+                                    #PE_SE = "PE-SE",
+                                    levels=design)
+cont.matrix
+
+## Build also matrix just for comparison between C and T
+group <- factor(samples$condition)
+
+design2 <- model.matrix(~ 0 + group)
+colnames(design2) <- levels(group)
+design2
+
+cont.matrix2 <- limma::makeContrasts(C_T  = "C-T",levels=design2)
+cont.matrix2
+
+```
+
+``` {r estimate&test_SEPE}
+y <- edgeR::DGEList(counts=counts, group=group) 
+y <- edgeR::calcNormFactors(y, method = "TMM") # adjust for different sizes of libraries
+
+y <- edgeR::estimateDisp(y,design) # estimate common, trended and tagwise dispersion
+fit <- edgeR::glmFit(y,design)
+lrt <- edgeR::glmLRT(fit, contrast = cont.matrix) # DGELRT-class
+DE_genes <- edgeR::topTags(lrt, n = Inf, adjust.method = "BH", p.value = 0.01)# Take all genes with p < threshold
+head(DE_genes)
+```
+
+
+``` {r estimate&test_C/T}
+y2 <- edgeR::DGEList(counts=counts, group=group) 
+y2 <- edgeR::calcNormFactors(y2, method = "TMM") # adjust for different sizes of libraries
+
+y2 <- edgeR::estimateDisp(y2,design2) # estimate common, trended and tagwise dispersion
+fit2 <- edgeR::glmFit(y2,design2)
+lrt2 <- edgeR::glmLRT(fit2, contrast = cont.matrix2) # DGELRT-class
+DE_genes2 <- edgeR::topTags(lrt2, n = Inf, adjust.method = "BH", p.value = 0.01)# Take all genes with p < threshold
+head(DE_genes2)
+```
+
+Finally we look for some genes that are found as DE in the first set-up vs. the second. Barplot on raw counts behaves as expected - there is big difference between samples based on `libtype`. Situation looks  similar for normalized counts (CPM).
+
+``` {r compare_barplot}
+
+sel_genes <- DE_genes$table[! rownames(DE_genes$table) %in% rownames(DE_genes2), ] # Select genes acording to criterion (see above)
+head(sel_genes)
+sel_genes_names <- rownames(sel_genes[1:2, 0]) # pick two genes from top
+bar_data <- edgeR::cpm(y$counts[sel_genes_names, ], normalized.lib.sizes = FALSE, log = FALSE) # cf. https://support.bioconductor.org/p/46779/
+barplot(bar_data , las=2, cex.names=.7, names = conds, beside = TRUE, horiz = FALSE, main = 'gene CPM',
+        legend.text = sel_genes_names, args.legend = list(x = 'topright'))
+
+bar_data <- counts[sel_genes_names, ] 
+barplot(bar_data , las=2, cex.names=.7, names = conds, beside = TRUE, horiz = FALSE, main = 'Raw Counts',
+        legend.text = sel_genes_names, args.legend = list(x = 'topright'))
+```
+
+Next, we will explore "differential splicing", using the same pasilla dataset (Note: this was used in the pasilla manuscript).
+
+```{r}
+library(pasilla)
+sdir <- file.path(system.file(package="pasilla"),"extdata/")
+anno <- file.path(sdir, "Dmel.BDGP5.25.62.DEXSeq.chr.gff")
+
+samplesX = data.frame(cond = rep( c("trt","untrt"), c(3,4) ),
+                      type = c("SE","PE","PE","SE","SE","PE","PE"),
+                      countfile = dir(sdir,pattern="fb.txt"),
+                      stringsAsFactors = TRUE)
+samplesX
+
+countFiles <- list.files(sdir, pattern="fb.txt")
+```
+
+#### Exercise 3. Fix the above code to run a standard DEXSeq analysis and plot one of the top differentially spliced genes -- for example, see the plotDEXSeq() function.
+
+#### Answer 3.:
+Here is the edited code. 
+
+* One thing I struggle with is defining the design matrix, especially with interaction term. I wouldn't know how to represent it in tems of an equation. *
+
+```{r DexSeq_estDisp}
+remove(dxd)
+# Cannot use the same data as before, missing info on exons
+# dxd <- DEXSeq::DEXSeqDataSet(countData = counts, sampleData = samples[, c('condition', 'libtype')])
+
+dxd <- DEXSeq::DEXSeqDataSetFromHTSeq(
+            countfiles=file.path( sdir, countFiles ),
+            sampleData = samplesX,
+            design = ~ exon + cond:exon + type:exon,
+            flattenedfile = anno)
+
+dxd <- DEXSeq::estimateSizeFactors( dxd , locfunc = genefilter::shorth) #locfunc = median
+
+# Obtain dispersion estimates for negative binomial distributed data
+dxd <- DEXSeq::estimateDispersions( dxd, fitType = 'parametric') #, formula = dxd@design)
+
+```
+
+``` {r DexSeq_DEU_test}
+# Perform a likelihood ratio test for differential exon usage
+dxd <- DEXSeq::testForDEU(dxd, reducedModel = ~ cond + exon)
+```
+
+```{r DEXSeq_res}
+dxr <- DEXSeq::DEXSeqResults( dxd, independentFiltering = TRUE )
+head(dxr)
+```
+
+
+``` {r DEU_gene}
+# Remove nans .... why do we have them in the first place?
+dxr_sub <- dxr[apply(dxr, 1, function(x) !any(is.na(x) )), ]
+
+# Pick gene that shows low p-value for test on DEU
+DEU_genes <- dxr_sub@listData$groupID[dxr_sub@listData$pvalue < 1e-50 & ! is.na(dxr_sub@listData$pvalue)]
+DEU_gene <- DEU_genes[sample(length(DEU_genes), 1)]
+DEU_gene
+
+par(oma=c(1,1,1,1))
+# Plot
+DEXSeq::plotDEXSeq(dxr, DEU_gene, fitExpToVar = 'cond', norCounts = FALSE, splicing = TRUE, displayTranscripts = TRUE, names = TRUE, legend = TRUE)
+```
+
+
+"Expression" is the expression strength of the gene, i.e., simply the average number of (normalized) reads that map to the sample in a given condition. "Exon usage" is an exon's usage, compared to all the other exons of the same gene. [more info](https://support.bioconductor.org/p/64007/)

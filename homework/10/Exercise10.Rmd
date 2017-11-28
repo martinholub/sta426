@@ -54,7 +54,7 @@ limma::plotMDS(y, labels =  conds, col = farbs, main = "limma:plotMDS")
 
 #### Answer2:
 
-* I am unclear on `include also the biological factor, knockout state`, but from the previous I understand it as refining the groups by including information on whether the data was acquired as SE or PE. *
+_I am unclear on `include also the biological factor, knockout state`, but from the previous I understand it as refining the groups by including information on whether the data was acquired as SE or PE._
 
 Morover, I came up with multiple ways how to define the contrasts and it feels that multiple are applicable in this case. In this script, I do the analysis twice. Once to check for differences between SE/PE respecting C/T difference and second the same way as before (Exercise8), to see differences just between C/T. I then look for genes that are differentially expressed in the first case but not found in the second scenario.
 
@@ -102,7 +102,7 @@ y <- edgeR::estimateDisp(y,design) # estimate common, trended and tagwise disper
 fit <- edgeR::glmFit(y,design)
 lrt <- edgeR::glmLRT(fit, contrast = cont.matrix) # DGELRT-class
 DE_genes <- edgeR::topTags(lrt, n = Inf, adjust.method = "BH", p.value = 0.01)# Take all genes with p < threshold
-head(DE_genes)
+head(DE_genes$table)
 ```
 
 
@@ -114,7 +114,7 @@ y2 <- edgeR::estimateDisp(y2,design2) # estimate common, trended and tagwise dis
 fit2 <- edgeR::glmFit(y2,design2)
 lrt2 <- edgeR::glmLRT(fit2, contrast = cont.matrix2) # DGELRT-class
 DE_genes2 <- edgeR::topTags(lrt2, n = Inf, adjust.method = "BH", p.value = 0.01)# Take all genes with p < threshold
-head(DE_genes2)
+head(DE_genes2$table)
 ```
 
 Finally we look for some genes that are found as DE in the first set-up vs. the second. Barplot on raw counts behaves as expected - there is big difference between samples based on `libtype`. Situation looks  similar for normalized counts (CPM).
@@ -133,14 +133,15 @@ barplot(bar_data , las=2, cex.names=.7, names = conds, beside = TRUE, horiz = FA
         legend.text = sel_genes_names, args.legend = list(x = 'topright'))
 ```
 
-Next, we will explore "differential splicing", using the same pasilla dataset (Note: this was used in the pasilla manuscript).
+Next, we will explore "differential splicing", using the same pasilla dataset.
+_Here you can read [more on differential splicing](https://bitesizebio.com/10148/what-is-alternative-splicing-and-why-is-it-important/)._
 
 ```{r}
 library(pasilla)
 sdir <- file.path(system.file(package="pasilla"),"extdata/")
 anno <- file.path(sdir, "Dmel.BDGP5.25.62.DEXSeq.chr.gff")
 
-samplesX = data.frame(cond = rep( c("trt","untrt"), c(3,4) ),
+samplesX = data.frame(cond = rep( c("T","C"), c(3,4) ),
                       type = c("SE","PE","PE","SE","SE","PE","PE"),
                       countfile = dir(sdir,pattern="fb.txt"),
                       stringsAsFactors = TRUE)
@@ -152,9 +153,11 @@ countFiles <- list.files(sdir, pattern="fb.txt")
 #### Exercise 3. Fix the above code to run a standard DEXSeq analysis and plot one of the top differentially spliced genes -- for example, see the plotDEXSeq() function.
 
 #### Answer 3.:
-Here is the edited code. 
+Here is the edited code. (Some information on DEXSeq can be obtained from its [vignette](https://bioconductor.org/packages/devel/bioc/vignettes/DEXSeq/inst/doc/DEXSeq.pdf)_.
 
-* One thing I struggle with is defining the design matrix, especially with interaction term. I wouldn't know how to represent it in tems of an equation. *
+_One thing I struggle with is defining the design matrix, especially with interaction term. I wouldn't know how to represent it in tems of an equation. Perhaps you could make a comment on this in lecture?_
+
+
 
 ```{r DexSeq_estDisp}
 remove(dxd)
@@ -164,7 +167,7 @@ remove(dxd)
 dxd <- DEXSeq::DEXSeqDataSetFromHTSeq(
             countfiles=file.path( sdir, countFiles ),
             sampleData = samplesX,
-            design = ~ exon + cond:exon + type:exon,
+            design = ~ cond + type  + exon,
             flattenedfile = anno)
 
 dxd <- DEXSeq::estimateSizeFactors( dxd , locfunc = genefilter::shorth) #locfunc = median
@@ -174,9 +177,14 @@ dxd <- DEXSeq::estimateDispersions( dxd, fitType = 'parametric') #, formula = dx
 
 ```
 
+** Likelihood ratio test**is a statistical test used for comparing the goodness of fit of two statistical models, one of which (the null model) is a special case of the other (the alternative model). The test is based on the likelihood ratio, which expresses how many times more likely the data are under one model than the other. This likelihood ratio, or equivalently its logarithm, can then be used to compute a p-value, or compared to a critical value to decide whether or not to reject the null model. _(read more [here](https://en.wikipedia.org/wiki/Likelihood-ratio_test))._
+
+In this exercise we compare alternative model `(~ cond + type  + exon)` to null model `~ cond + type` and therefore test if a model including the information on the exon composition of trascripts could better explain the data. Alternativelly we may could investigate interaction terms of the form `cond:exon` and `type:exon`
+
 ``` {r DexSeq_DEU_test}
 # Perform a likelihood ratio test for differential exon usage
-dxd <- DEXSeq::testForDEU(dxd, reducedModel = ~ cond + exon)
+
+dxd <- DEXSeq::testForDEU(dxd, reducedModel = ~ cond + type)
 ```
 
 ```{r DEXSeq_res}
@@ -190,12 +198,12 @@ head(dxr)
 dxr_sub <- dxr[apply(dxr, 1, function(x) !any(is.na(x) )), ]
 
 # Pick gene that shows low p-value for test on DEU
-DEU_genes <- dxr_sub@listData$groupID[dxr_sub@listData$pvalue < 1e-50 & ! is.na(dxr_sub@listData$pvalue)]
+DEU_genes <- dxr_sub@listData$groupID[(dxr_sub@listData$pvalue < 1e-50) & (! is.na(dxr_sub@listData$pvalue))]
 DEU_gene <- DEU_genes[sample(length(DEU_genes), 1)]
 DEU_gene
 
 par(oma=c(1,1,1,1))
-# Plot
+# Plot the select gene
 DEXSeq::plotDEXSeq(dxr, DEU_gene, fitExpToVar = 'cond', norCounts = FALSE, splicing = TRUE, displayTranscripts = TRUE, names = TRUE, legend = TRUE)
 ```
 

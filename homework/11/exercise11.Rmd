@@ -1,7 +1,7 @@
 ---
-title: "Exercise 10"
+title: "Exercise 11"
 author: "Martin Holub"
-date: "31 11 2017"
+date: "2 11 2017"
 output: html_document
 ---
 
@@ -119,22 +119,31 @@ f1_score_fun(knn1@testPredictions, cervicalClass)[1]
 
 Setup a balanced k-fold cross-validation scheme
 
-__ From here on, I run into issues with MLInterfaces. Although the underlying classifiers work in their respecitve evnironments, they will fail to produce result when wrapped within the MLInterfaces. I tried running the code both on Linux and Windows. I address the problem by using the underlying classifers to obtain ressults. I compute F1 score as a metric of performance. __
+**From here on, I run into issues with MLInterfaces. Although the underlying classifiers work in their respecitve evnironments, they will fail to produce result when wrapped within the MLInterfaces. I tried running the code both on Linux and Windows. I address the problem by using the underlying classifers to obtain ressults. I compute F1 score as a metric of performance.**
 
-__ The fact that the package was not working for me, increased the amount of time necessary for the exercise. I have tried multuiple ways how to debug it but to no avail. Despite these problems I managed to produce results as required. I would like to ask you to consider this fact when grading and do not immediately subtract points for usage of different approach.__
+**The fact that the package was not working for me, increased the amount of time necessary for the exercise. I have tried multuiple ways how to debug it but to no avail. Despite these problems I managed to produce results as required. I would like to ask you to consider this fact when grading and do not immediately subtract points for usage of different approach.**
 
-_ If you immediately see what may have gone wrong, I will be happy to hear feedback._
+*If you immediately see what may have gone wrong, I will be happy to hear feedback.*
 
 
 
-```{r MLInt_knn_LOG, eval = FALSE}
-# Does not work! 
+```{r MLInt_knn_LOG, eval}
+# Does not work!
 k = 10
-knnCV <- MLInterfaces::MLearn(formula = cervicalClass~., data = exprs.df, .method = MLInterfaces::knnI(k = 5, l = 3),
-                             trainInd = MLInterfaces::xvalSpec("LOG", k, MLInterfaces::balKfold.xvspec(k)))
+#knnCV <- MLInterfaces::MLearn(formula = cervicalClass~., data = exprs.df, .method = MLInterfaces::knnI(k = 5, l = 3),
+#                            trainInd = MLInterfaces::xvalSpec("LOG", k, MLInterfaces::balKfold.xvspec(k)))
 
-MLInterfaces::confuMat(knnCV)
-f1_score_fun(knnCV@testPredictions, cervicalClass)[1]
+exprs.dft <- as.data.frame((cervES@assayData$exprs))
+set.seed(101) # Set Seed so that same sample can be reproduced in future also
+# Now Selecting 50% of data as sample from total 'n' rows of the data
+sample <- sample.int(n = ncol(exprs.dft), size = floor(.5*ncol(exprs.dft)), replace = F)
+train <- data.matrix(exprs.dft[, sample])
+test  <- data.matrix(exprs.dft[, -sample])
+knnCV <- class::knn(t(train), t(test), (cervicalClass[sample]), k = 5, l = 3, prob = TRUE)
+
+#MLInterfaces::confuMat(knnCV)
+# Get F1 score on test set
+f1_score_fun(knnCV, cervicalClass[-sample])[1]
 ```
 
 ## Other classifiers

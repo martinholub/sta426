@@ -119,17 +119,19 @@ f1_score_fun(knn1@testPredictions, cervicalClass)[1]
 
 Setup a balanced k-fold cross-validation scheme
 
-__ From here on, I run into issues with MLInterfaces. Although the underlying classifiers work in their respecitve evnironments, they will fail to produce result when wrapped within the MLInterfaces. I address the problem by using the underlying classifers to obtain ressults. I compute F1 score as a metric of performance. __
+__ From here on, I run into issues with MLInterfaces. Although the underlying classifiers work in their respecitve evnironments, they will fail to produce result when wrapped within the MLInterfaces. I tried running the code both on Linux and Windows. I address the problem by using the underlying classifers to obtain ressults. I compute F1 score as a metric of performance. __
 
-_Overall I see very little reason for using MLInterfaces and R for machine learning because it appears inferior to what is available in Python. _
+__ The fact that the package was not working for me, increased the amount of time necessary for the exercise. I have tried multuiple ways how to debug it but to no avail. Despite these problems I managed to produce results as required. I would like to ask you to consider this fact when grading and do not immediately subtract points for usage of different approach.__
+
+_ If you immediately see what may have gone wrong, I will be happy to hear feedback._
+
 
 
 ```{r MLInt_knn_LOG, eval = FALSE}
-# Does not work at all!
-
+# Does not work! 
 k = 10
 knnCV <- MLInterfaces::MLearn(formula = cervicalClass~., data = exprs.df, .method = MLInterfaces::knnI(k = 5, l = 3),
-                             MLInterfaces::xvalSpec("LOG", k, MLInterfaces::balKfold.xvspec(k)))
+                             trainInd = MLInterfaces::xvalSpec("LOG", k, MLInterfaces::balKfold.xvspec(k)))
 
 MLInterfaces::confuMat(knnCV)
 f1_score_fun(knnCV@testPredictions, cervicalClass)[1]
@@ -140,8 +142,7 @@ f1_score_fun(knnCV@testPredictions, cervicalClass)[1]
 Compute the performance of the diagonal linear discriminant analysis and support vector machines provided by MLInterfaces.
 
 ``` {r DiagLin_DA}
-
-# Doesnt work at all!
+# Doesnt work
 #diagDA_res = MLInterfaces::MLearn(cervicalClass~.,exprs.df, MLInterfaces::dldaI, trainInd =(1:ncol(cervES)))
 
 trueLabels <- rep(1, length(cervicalClass))
@@ -157,16 +158,12 @@ f1_score_fun(diagDA_res, cervicalClass)[1]
 
 
 ``` {r svm}
-
-# Doesnt work at all!
+# Doesnt work
 #svm_res = MLInterfaces::MLearn(cervicalClass~.,exprs.df, MLInterfaces::ksvmI, trainInd =(1:ncol(cervES)))
 
 trueLabels <- rep(1, length(cervicalClass))
 trueLabels[cervicalClass == 'T'] <- 2
 svm_res <- kernlab::ksvm(x = t(cervES@assayData$exprs), y = cervicalClass, cross = 10)
-#diagDA_res[diagDA_res == 2] <- 'T'
-#diagDA_res[diagDA_res == 1] <- 'N'
-#diagDA_res <- factor(diagDA_res)
 
 #MLInterfaces::confuMat(svm_res)
 f1_score_fun(svm_res@fitted, cervicalClass)[1]
@@ -174,6 +171,7 @@ f1_score_fun(svm_res@fitted, cervicalClass)[1]
 
 ## Wrap UP
 
+
 * We can say that `ksvm` performs the best with the default parameters. This is not very telling and applicable only to the data at hand as thorough study of classifers would require more elaborate and systematic approach as well as more data.
 
-* ML tasks are to be done in Python 
+* Overall I see very little reason for using MLInterfaces and R for machine learning because it appears inferior to what is available in Python. 

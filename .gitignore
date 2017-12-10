@@ -7,3 +7,4 @@ project/*.txt
 homework/8/data/*
 homework/10/data/*
 *.Rhistory
+*.rds

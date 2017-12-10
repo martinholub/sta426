@@ -1,0 +1,156 @@
+---
+title: "Exercise 12: dimension reduction in single-cell datasets"
+author: "Martin Holub"
+date: "12 11 2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## scRNA-seq exercise
+
+Download one of the scRNA-seq datasets (use the 'Download .rds' button) from the [conquer database](http://imlspenticton.uzh.ch:3838/conquer/); keep in mind that the larger the number of cells, the larger the file will be.  Also, it may be more interesting to pick a dataset where you can see reasonably distinct cell subtypes/subsets, so you may want to first click in the 'scater report' link for a dataset and look through some of the dimension reduction plots.
+
+After downloading, read the dataset into R (use 'readRDS') and understand the format of the data that you get (Note: there is a 'Tutorial' tab on the main conquer page that contains useful information).  You may also want to check the corresponding QC metrics from conquer; for example, click on the 'MultiQC report' links to see more details for your dataset.
+
+*The overall goal here is to transform, filter, explore and project in low dimensions a single-cell RNA-seq dataset down to 2 or 3 dimensions.*
+
+*Here is a potential pipeline: extract the count table, compute the counts per million (e.g., using column sums), transform the data with a 'log(eps+cpm)' where eps is a number between 1 and 20, filter out low variance genes (I suggest looking at a variance-mean plot and retaining 200-500 genes with the highest variance on the log-transformed scale)  and then using a method (e.g., tSNE, diffusion maps, PCA) to project the data down to 2 or 3 dimensions.  When you make the low-dimensional project, colour the points (cells) according to the label given in the metadata to see whether you've been successful in differentiating the different conditions/cell types. There is not a single way to do this, but the hope is that any good low-dimensional projection allows you to recapture biological features of the data.*
+
+```{r read_rds}
+# http://imlspenticton.uzh.ch/robinson_lab/conquer/report-scater/GSE45719_scater.html
+data_rds <- readRDS("GSE45719.rds")
+class(data_rds)
+```
+
+
+Acess gene abundances in the `gene` experiment. Then get the gene read counts (obtained by summing the estimated read counts for the gene's isoforms) from `assay` `counts`.
+
+``` {r get_counts}
+counts <- (data_rds@ExperimentList$gene@assays$data$count)
+dims <- dim(counts)
+```
+
+There is `r dims[1]` genes and `r dims[2]` cells. The count matrix takes `r object.size(counts) / (2^20)` Mb of memory.
+
+Now we compute counts per million (for comparison also shonw equivalent edgeR code) and transform the data with `eps` offset
+
+``` {r get_cpm}
+eps <- 1
+# counts.cpm <- edgeR::cpm(counts, log = FALSE, prior.count = 0)
+counts.cpm <- apply(counts, 2, function(x) (x/sum(x))*1e6)
+counts.log_cpm <- log(counts.cpm + eps, base = exp(1)) # Natural logarithm
+remove(counts)
+remove(counts.cpm)
+```
+
+Next, we retain only few hundreds of these genes that show the largest variance:
+
+``` {r filter_out}
+rows_var <- apply(counts.log_cpm, MARGIN = 1, FUN = var)
+counts.log_cpm <- head( counts.log_cpm[order(rows_var, decreasing = TRUE),] , 250 )
+```
+
+Finally we inspect low dimensionality representation and check if we have sucsesfully disrimniated different cell types and developmental stages.
+
+``` {r dim_reduction}
+cell_types <- (data_rds@colData$source_name_ch1)
+names <- levels(cell_types)
+n <- length(names)
+
+qual_col_pals <- RColorBrewer::brewer.pal.info[RColorBrewer::brewer.pal.info$category == 'qual',]
+col_vector <- unlist(mapply(RColorBrewer::brewer.pal, qual_col_pals$maxcolors, rownames(qual_col_pals)))
+# pie(rep(1,n), col=sample(col_vector, n))
+cols <- col_vector[1:n]
+cols <- cols[cell_types]
+```
+
+For PCA, we see that plotting the top 2 PCs allows for good separation of idividual cell types.
+
+``` {r PCA}
+counts.pca <- prcomp(x = counts.log_cpm, center = TRUE, scale = TRUE, retx = TRUE)
+par(xpd = T, mar = par()$mar + c(0,0,0,15))
+plot(counts.pca$rotation[,1:2], main = "PCA of Per-sample expression levels", col = cols, pch = 19)
+legend("right", inset=c(-1.15,0), legend = names, col = col_vector[1:n], cex = 0.75, y.intersp = 0.75, ncol = 1, pch = 19)
+par(mar=c(5, 4, 4, 2) + 0.1)
+```
+
+On the other hand, tSNE is not very helpful in this sense.
+
+``` {r tSNE}
+
+counts.tsne <- Rtsne::Rtsne(counts.pca$rotation, pca = FALSE, perplexity = 30, max_iter = 2000, dims = 5)
+#counts.tsne <- Rtsne::Rtsne(counts.log_cpm, pca = TRUE, pca_center = TRUE, pca_scale = TRUE,  perplexity = 30, max_iter = 2000, dims = 2)
+par(xpd = T, mar = par()$mar + c(0,0,0,15))
+scatterplot3d::scatterplot3d(counts.tsne$Y[, c(1, 2, 3)], color = cols, main = "tSNE plot", pch = 19)
+#plot(counts.tsne$Y[, c(1, 2)], col = cols, main = "tSNE plot", pch = 19)
+legend("right", inset=c(-1.15,0), legend = names, col = col_vector[1:n], cex = 0.75, y.intersp = 0.75, ncol = 1, pch = 19)
+par(mar=c(5, 4, 4, 2) + 0.1)
+
+```
+
+Diffusion map, similarly as PC well separates the indiviudal cell types using 2nd and 3rd dimension.
+
+``` {r diffusionMap}
+counts.dmap <- destiny::DiffusionMap(t(counts.log_cpm), sigma = "local", density_norm = TRUE, distance = "cosine")
+par(xpd = T, mar = par()$mar + c(0,0,0,15))
+destiny::plot.DiffusionMap(counts.dmap, dims = 2:3, col = cols, pch = 19, main = "Diffusion map")
+legend("right", inset=c(-1.15,0), legend = names, col = col_vector[1:n], cex = 0.75, y.intersp = 0.75, ncol = 1, pch = 19)
+par(mar=c(5, 4, 4, 2) + 0.1)
+```
+
+
+(Optional #1) Pick two of the cell types within the dataset you chose and try and find marker genes that distinguish between them.  For example, you could use a 'wilcox.test' in R to test the difference.  Highlight just this set of genes for the two sets of cells in a heatmap.
+
+We pick two consecutive stages of developement.
+
+``` {r subpopulation}
+idxer1 <-  cell_types ==  "Early blastocyst cell (86-88h post-fertilization)" #  "Zygote"
+idxer2 <- cell_types ==  "Mid blastocyst cell (92-94h post-fertilization)"  # "Liver cell"
+wtest.cells <- cbind(counts.log_cpm[ , idxer1], counts.log_cpm[ ,idxer2])
+
+wtest.res <- apply(cbind(counts.log_cpm[ , idxer1], counts.log_cpm[ ,idxer2]), 1, 
+                   function(x) wilcox.test(x[1:sum(idxer1)], x[(sum(idxer1) + 1) : (sum(idxer1) + sum(idxer2))], 
+                                           alternative = "two.sided", exact = FALSE))
+wtest.p <- unlist(lapply(wtest.res,  function(x) x$p.value))
+wtest.genes <- rownames(counts.log_cpm)[wtest.p < 0.001]
+```
+
+Next we sort the genes according the result of wilcox test such that the most different genes are at the top. We color code rows and columns of the resulting heatmap by p-value and cell_type respecitvely.
+
+``` {r heatmap}
+wtest.cells_psort <- (wtest.cells[order(wtest.p, decreasing = FALSE),])
+cols.hm <- col_vector[1:n]
+
+my_palette <- colorRampPalette(c("orange", "red"))(n = 20)
+gplots::heatmap.2(wtest.cells_psort, 
+                  #distfun = dist_fun,
+                  dendrogram = "none",
+                  #Rowv = as.dendrogram(clusters), Colv = "Rowv",
+                  Rowv = NULL, Colv = NULL,
+                  #labCol = colnames(wtest.cells_psort), labRow = rownames(wtest.cells_psort),
+                  labCol = "", labRow = "",
+                  density.info="none",
+                  col = gplots::redgreen(75),
+                  trace = "none",
+                  scale = "none",
+                  main = "Genes \\ Samples expression heatmap",
+                  ColSideColors = c(rep(cols.hm[1], sum(idxer1)), rep(cols.hm[2], sum(idxer2))),
+                  RowSideColors = c(rep(cols.hm[3], length(wtest.genes)), rep(cols.hm[4], length(wtest.res) - length(wtest.genes))))
+
+#legend('topright', labels = c("Early-Stage", "Mid-Stage", "Differential", "-"), col = cols.hm[1:4])
+
+# More fancy plot could make use of :
+# pheatmap: https://stackoverflow.com/questions/41608294/r-heatmap-2-manual-grouping-of-rows-and-columns
+# ComplexHeatmap: https://bioconductor.org/packages/devel/bioc/vignettes/ComplexHeatmap/inst/doc/s9.examples.html
+```
+
+The resulting plot doesn't look that persuasive, I would expect there to be more appreciable difference between the two cell types. Nevrtheless, I confremd the approach on two types that showed expected difference ("Zygote" and "Liver Cell").
+
+---
+
+(Optional #2) Using your clustering algorithm of choice, cluster the cells into the number of cell types from your chosen dataset.  Calculate the F1 score for each true cell type.  Calculate also the adjusted rand index.
+
+Left fot some other time.

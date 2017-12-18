@@ -1,13 +1,14 @@
 ---
 title: "STA426 lesson materials: High-dimensional cytometry data analysis (11 Dec 2017)"
-author: "Lukas M. Weber"
-date: "12/10/2017"
+author: "Martin Holub"
+date: "12/17/2017"
 output: html_document
 ---
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE, root.dir = "./temp")
 knitr::opts_knit$set(root.dir = "./temp")
+knitr::opts_chunk$set(error = TRUE)
 
 suppressPackageStartupMessages({
   library(readxl)
@@ -30,6 +31,7 @@ suppressPackageStartupMessages({
   library(multcomp)
   library(cytofWorkflow)
 })
+
 ```
 # Install Bioconductor
 
@@ -47,22 +49,20 @@ It can be installed as follows:
 source("https://bioconductor.org/workflows.R")
 workflowInstall("cytofWorkflow")
 ```
+
+You can get better understanding of the code by going through the related [method article](https://f1000research.com/articles/6-748/v2).
+
 # Data import
 
 Notes:
 
-- Description of BCR-XL data set: see Bioconductor workflow
-- Explanation of .fcs files
-- Preprocessing: normalization, de-barcoding, compensation, removal of dead cells and doublets
-
-
-Check working directory:
-
-Then continue by following the steps in the main workflow script "cytofWorkflow.R".
+- Preprocessing: normalization, de-barcoding, compensation, removal of dead cells and doublets has been alread done.
 
 ```{r setwd, eval = FALSE, include = FALSE}
 getwd()
 ```
+
+### Load Metadata
 
 ``` {r load_metadata}
 library(readxl)
@@ -74,7 +74,8 @@ md <- read_excel(metadata_filename)
 
 ```
 
-**Generate Subset corresponding to the task.**
+## Generate Subset corresponding to the task
+We do 'null-coparsion and thus are interested only in the 8 reference samples.'
 
 ``` {r subset}
 # SUBSET
@@ -89,11 +90,12 @@ head(data.frame(md))
 
 ``` {r load_metadata2}
 
-
 ## Define colors for conditions
 color_conditions <- c("#6A3D9A", "#FF7F00")
 names(color_conditions) <- levels(md$condition)
 ```
+
+### Load Data
 
 ``` {r load_fcs}
 ## ----download-fcs
@@ -109,6 +111,9 @@ fcs_raw <- read.flowSet(md$file_name, transformation = FALSE,
 fcs_raw
 ```
 
+### Load Panel
+
+Panel gives information on metail isotopes used for protein tagging.
 
 ``` {r load_panel}
 ## ----load-panel
@@ -136,6 +141,8 @@ all(lineage_markers %in% panel_fcs$desc)
 all(functional_markers %in% panel_fcs$desc)
 
 ```
+
+### Transform Data & Extract protein abundance values
 
 ``` {r adjust}
 ## ----arcsinh-transformation----------------------------------------------
@@ -166,6 +173,13 @@ expr01[expr01 > 1] <- 1
 sample_ids <- rep(md$sample_id, fsApply(fcs_raw, nrow))
 
 ```
+# Diagnostic Plots
+
+## Plot Marker Expression
+
+The step below generates a plot with per-sample marker expression distributions, colored by condition. This is to verify that marker expression distributions do not have any abnormalities such as having different ranges or distinct distributions for a subset of the samples. This could highlight problems with the sample collection or HDCyto acquisition, or batch effects that were unexpected. Depending on the situation, one can then consider removing problematic markers or samples from further analysis; in the case of batch effects, a covariate column could be added to the metadata table and used below in the statistical analyses .(Nowicka et al., 2017)
+
+We see that there are markers that have different distributions, e.g. pp38, CD4, pNFkB, pAkt. As all samples are unstimulated this suggests some issues in the experimental protocol or batch effect.
 
 ``` {r plot merker}
 
@@ -177,9 +191,6 @@ ggdf$condition <- md$condition[mm]
 
 #ggdf <- ggdf[grepl("^Ref[0-9]$", ggdf$sample_id), ] #ggdf[ggdf$condition == "Ref"]
 
-```
-
-``` {r plot_merker2}
 ## ----plot-merker-expression-distribution, fig.cap = "Per-sample smoothed densities of marker expression (arcsinh-transformed) of 10 lineage markers and 14 functional markers in the PBMC dataset. Two conditions: unstimulated (Ref) and stimulated with BCR/FcR-XL (BCRXL) for each of the 8 healthy donors are presented and colored by experimental condition."----
 library(ggplot2)
 library(reshape2)
@@ -192,7 +203,16 @@ ggplot(ggdf, aes(x = expression, color = condition,
   theme(axis.text.x = element_text(angle = 90, hjust = 1), 
     strip.text = element_text(size = 7), axis.text = element_text(size = 5)) +
   scale_color_manual(values = color_conditions)
+```
 
+## Plot number of cells per sample
+
+This plot can be used as a guide to identify samples where not enough cells were assayed.
+
+We immediately see that patient1 has significantly undersample reference and that overall, the first three reference samples selected here to be group A have mean cell count `r mean(ggdf$cell_counts[1:4])` with sd `r sd((ggdf$cell_counts[1:4]))` compared to the other four in group B with mean `r mean(ggdf$cell_counts[5:8])` with sd `r sd((ggdf$cell_counts[5:8]))`.
+
+
+``` {r plot_no_cells}
 
 ## ----plot-number-of-cells, fig.height = 4, fig.cap = "Barplot showing the number of cells measured for each sample in the PBMC dataset. Bars are colored by experimental condition: unstimulated (Ref) and stimulated with BCR/FcR-XL (BCRXL). Numbers in the names on the x-axis indicate patient IDs. Numbers on top of the bars indicate the cell counts."----
 cell_table <- table(sample_ids)
@@ -213,6 +233,12 @@ ggplot(ggdf, aes(x = sample_id, y = cell_counts, fill = condition)) +
   scale_fill_manual(values = color_conditions, drop = FALSE) +
   scale_x_discrete(drop = FALSE)
 ```
+
+## Plot MDS
+
+An MDSplot for HDCyto data using median marker expression over all cells to calculate dissimilarities between samples. Ideally, samples should cluster well within the same condition, although this depends on the magnitude of the difference between experimental conditions. (Nowicka et al., 2017)
+
+We observe three clusters that are clearly separated in the 2D MDS plot. First dimension separates the arbitrary groups A and B and the second dimension divides the group A into two subgroups. Such clustering indicates differences between patients (1,2 and 3,4) and possible batch effect coinciding with our selection of the two groups (first 4 samples A , remaining 4 B). It would be instructive to know details on the experimental protocol and whether the samples have been colelcted on different days.
 
 ``` {r plot_mds}
 ## ----plot-mds, fig.cap = "MDS plot for the unstimulated (Ref) and stimulated with BCR/FcR-XL (BCRXL) samples obtained for each of the 8 healthy donors in the PBMC dataset. Calculations are based on the median (arcsinh-transformed) marker expression of 10 lineage markers and 14 functional markers across all cells measured for each sample.  Distances between samples in the plot approximate the typical change in medians. Numbers in the label names indicate patient IDs."----
@@ -240,6 +266,17 @@ ggplot(ggdf, aes(x = MDS1, y = MDS2, color = condition)) +
   scale_color_manual(values = color_conditions) +
   coord_fixed()
 ```
+
+
+## Plot Dendrogram
+
+A heatmap of the data gives insight into its structure. The heatmap shows median marker intensities with clustered columns (samples) and rows (markers). Hierarchical clustering with average linkage and euclidean distance was used. We can see which markers drive the observed clustering of samples. (Nowicka et al., 2017)
+
+The heatmap is color-coded with yellow for lower expression and blue for higher expression. The numbers in the heatmap represent the actual expression values. Dendrograms present clustering of samples (columns) and markers (rows) which is based on hierarchical clustering with Euclidean distance metric and average linkage. The two conditions: RefA and RefB are presented with a bar colored by experimental condition on top of the heatmap. Numbers in the column label names indicate patient IDs. (Nowicka et al., 2017)
+
+We observe multiple things, first markers that showed different distibution in Marker Plot above are clustered together in this heatmap (CD4, pNFkB, pAkt, pp38). Second Clustering of samples corresponds to the MDS plot where Three distinct clusters have been observed. Whereas group B shows good homogeneity, this is not true for group B.Howver, ideally there would not be much difference between the two groups in temrs of protien abundance as all of the samples are referecne without treatement. The differences indicate e.g. apriori differences between patients. 
+
+
 ``` {r plot_dendogram}
 ## ----plot-dendogram, fig.cap = "Heatmap of the median (arcsinh-transformed) marker expression of 10 lineage markers and 14 functional markers across all cells measured for each sample in the PBMC dataset. Color-coded with yellow for lower expression and blue for higher expression. The numbers in the heatmap represent the actual expression values. Dendrograms present clustering of samples (columns) and markers (rows) which is based on hierarchical clustering with Euclidean distance metric and average linkage. The two conditions: unstimulated (Ref) and stimulated with BCR/FcR-XL (BCRXL) for each of the 8 healthy donors are presented with a bar colored by experimental condition on top of the heatmap. Numbers in the column label names indicate patient IDs."----
 library(RColorBrewer)
@@ -259,6 +296,10 @@ pheatmap(expr_median_sample, color = color, display_numbers = TRUE,
   annotation_colors = annotation_colors, clustering_method = "average")
 
 ```
+
+## Plot Non-Redundancy Score
+
+We calculate the PCA-bsaed non-redundancy score (NRS) to indetify the abilit of markers to explaine the variance observed in each sample. Markers with higher score explain a larger portion of variability present in a given sample. The average NRS can be used to select a subset of markers that are non-redundant in each sample but at the same time capture the overall diversity between samples. Such a subset of markers can be then used for cell population identification analysis (i.e. clustering). (Nowicka et. al, 2017). 
 
 ```{r plot_nrs}
 
@@ -297,6 +338,14 @@ ggplot(ggdf, aes(x = antigen, y = nrs)) +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1)) +
   scale_color_manual(values = color_conditions)
 ```
+
+## FlowSOM
+
+We conduct cell clustering with FlowSOM (Van Gassen et al., 2015) and ConsensusClusterPlus (Wilkerson & Hayes, 2010), which appeared amongst the fastest and best performing clustering approaches in a recent study of HDCyto datasets (Weber & Robinson, 2016).
+
+The FlowSOM workflow consists of three main steps. First, a self-organizing map (SOM) is built using the BuildSOM function, where cells are assigned according to their similarities to 100 (by default) grid points (or, so-called codebook vectors or codes) of the SOM. The building of a minimal spanning tree, which is mainly used for graphical representation of the clusters, is skipped in this pipeline. And finally, metaclustering of the SOM codes, is performed directly with the ConsensusClusterPlus function. Additionally, we add an optional round of manual expert-based merging of the metaclusters and allow this to be done in a reproducible fashion. (Nowicka et al., 2017)
+
+The dendrogram on the left represents the hierarchical similarity between the 20 metaclusters (metric: Euclidean distance; linkage: average). Each cluster has a unique color assigned (bar on the left), values in the brackets next to the cluster numbers indicate the relative size of clusters. (Nowicka et al., 2017)
 
 ```{r flowSOM}
 ## ----flowsom-som---------------------------------------------------------
@@ -391,6 +440,11 @@ plot_clustering_heatmap_wrapper(expr = expr[, lineage_markers_ord],
 
 ```
 
+## Plot Marker abundance distribution
+
+Instead of using only medians, which do not give a full representation of cluster specifics, one can plot the entire marker expression distribution in each cluster. These can then be used to merge redundant clusters that are due to overclustering in previous step.
+
+
 ``` {r plot_clustering_distr}
 
 ## ----plot-clustering-distribution1, fig.height = 8, fig.cap = "Distributions of marker intensities (arcsinh-transformed) of the 10 lineage markers in the 20 cell populations obtained with FlowSOM after the metaclustering step with ConsensusClusterPlus (PBMC data). Red densities represent marker expression for cells in a given cluster. Green densities are calculated over all the cells and serve as a reference."----
@@ -439,6 +493,9 @@ plot_clustering_distr_wrapper(expr = expr[, lineage_markers_ord],
   cell_clustering = cell_clustering1)
 ```
 
+## Plot Heatmap of median expression
+
+A heatmap that depicts median expression of functional markers in each sample (see Figure 8) so the potential differential expression can be investigated already at this data exploration step before the formal testing is done.
 
 ```{r plot_hm_complex}
 ## ----plot-clustering-heatmap1-complex, fig.cap = "Heatmap of the median marker intensities of the 10 lineage markers and one signaling marker (pS6) across the 20 cell populations obtained with FlowSOM after the metaclustering step with ConsensusClusterPlus (PBMC data). This plot was generated using ComplexHeatmaps. The left panel presents a heatmap analogous  to the one in Figure \\@ref(fig:plot-clustering-heatmap1), additionally, it contains a barplot along the rows (clusters) which represents the relative sizes of clusters. Heatmap on the right represents the median of the arcsinh, 0-1 transformed marker expression for a signaling marker pS6 calculated over cells in each sample (columns) individually."----
@@ -561,6 +618,11 @@ plot_clustering_heatmap_wrapper2(expr = expr, expr01 = expr01,
   color_clusters = color_clusters, cluster_merging = NULL)
 ```
 
+## TSNE
+
+We can color the cells by cluster. Ideally, cells of the same color should be close to each other. When the plots are further stratified by sample , we can verify whether similar cell populations are present in all replicates, which can help in identifying outlying samples. Optionally, stratification can be done by condition . With such a plot, we can inspect whether differences in cell abundance are strong between conditions, and we can visualize and identify distinguishing clusters before applying formal statistical testing.
+
+Overall it appears that all samples have similar 'meta-marker' distributions and we also don't see much of a difference between the two artificial conditions A and B. This is what we would expect from null-comparison. 
 
 
 ``` {r tsne}
@@ -628,8 +690,15 @@ ggp + facet_wrap(~ sample_id)
 ggp + facet_wrap(~ condition) 
 ```
 
+## Plot clustering on SOM Codes
 
-``` {r}
+The SOM codes represent characteristics of the 100 (by default) clusters generated in the first step of the FlowSOM pipeline. Their visualization can also be helpful in understanding the cell population structure and determining the number of clusters. Ultimately, the metaclustering step uses the codes and not the original cells. We treat the codes as new representative cells and apply the t-SNE dimension reduction to visualize them in 2D. The size of the points corresponds to the number of cells that were assigned to a given code.
+
+Using heatmaps, we can also visualize median marker expression in the 100 SOM codes. (Nowicka et al., 2017)
+
+We then merge the clusters to a final number of 6 main cell types (T-cells, monocytes, dendritic cells, B-cells, NK cells and surface- cells), as they were identified by the author sof the data. (Bodenmiller et al., 2012)
+
+``` {r Somcodes}
 ## ----som-codes-size------------------------------------------------------
 ## Get code sizes; sometimes not all the codes have mapped cells so they will have size 0
 code_sizes <- table(factor(som$map$mapping[, 1], levels = 1:nrow(codes))) 
@@ -802,7 +871,16 @@ plot_clustering_heatmap_wrapper(expr = expr[, lineage_markers_ord],
   color_clusters = color_clusters)
 ```
 
-``` {r diff_freqs}
+## Diferential cell population abundance
+
+Differential analysis of cell population abundance compares the proportions of cell types across experimental conditions and aims to highlight populations that are present at different ratios. (Nowicka et al., 2017)
+
+
+In general, we do not expect to observe significant difference in protein abundances between the samples and experimental conditions as we are doing null-coparison only. This is demonstrated in subsequent statistical analysis. 
+
+*Note: Some functions fail to evaulate which, I suspect may be due to the faact that we are doing null (i.e. nonsensical) comparsion.* 
+
+``` {r diff_freqs, eval = FALSE}
 
 ## ----diff-freqs-define_model---------------------------------------------
 library(lme4)
@@ -810,7 +888,7 @@ library(multcomp)
 ## Model formula without random effects
 model.matrix( ~ condition, data = md)
 ## Create contrasts
-contrast_names <- c("BCRXLvsRef")
+contrast_names <- c("RefAvsRefB")
 k1 <- c(0, 1)
 K <- matrix(k1, nrow = 1, byrow = TRUE, dimnames = list(contrast_names))
 K
@@ -970,7 +1048,7 @@ mm <- match(colnames(asin_norm), md$sample_id)
 
 **No sifigicantly differential abundance, OK, as doing null comparison.**
 
-``` {r no_diff, eval = FALSE}
+``` {r no_diff3, eval = FALSE}
 # 
 # plot_differential_heatmap_wrapper(expr_norm = asin_norm, sign_adjp = sign_adjp, 
 #   condition = md$condition[mm], color_conditions = color_conditions)
@@ -1075,7 +1153,7 @@ apply(de_out1$adjp < FDR_cutoff, 2, table)
 
 **No Differential Abundance**
 
-``` {r no_diff, eval = FALSE}
+``` {r no_diff2, eval = FALSE}
 de_out2 <- differential_expression_wrapper(expr_median = expr_median_sample_cluster, 
   md = md, model = "lmer", formula = formula_lmer, K = K)
 apply(de_out2$adjp < FDR_cutoff, 2, table)
@@ -1170,15 +1248,6 @@ plot_differential_heatmap_wrapper(expr_norm = expr_median_sample_norm,
 ``` {r sessionifo}
 sessionInfo()
 ```
-# Exercise
-
-Perform a "null comparison" using code and data from the CyTOF workflow.
-
--  e.g. 4 vs. 4 comparison of "Reference" samples only
--  modify inputs to the differential testing / plotting functions and re-run the analysis
--  what do we expect? what do the results show?
-
-Write up the results in a short report containing visualizations, results, and interpretation.
 
 
 

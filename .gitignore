@@ -5,6 +5,7 @@ temp/
 affy_estrogen/*
 RSEM_counts/*
 project/*.txt
+project/*.gz
 homework/8/data/*
 homework/10/data/*
 *.Rhistory

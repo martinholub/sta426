@@ -1,109 +1,106 @@
 ---
-title: "DropSeq Analysis"
+title: "Drop-seq Analysis"
 author: "Martin Holub"
-date: "January 1, 2017"
-output: 
-  html_document:
+date: "January 1, 2018"
+output:
+  pdf_document:
+    citation_package: natbib
+    fig_caption: yes
+    fig_height: 6
+    fig_width: 7
     highlight: pygments
+    number_sections: yes
+  html_document:
+    fig_caption: yes
+    fig_height: 6
+    fig_width: 7
+    highlight: pygments
+    number_sections: yes
+    theme: journal
+header-includes: \usepackage[ singlelinecheck=false, justification=centering ]{caption}
+bibliography: bibliography.bib
+urlcolor: blue
 ---
-```{r, eval = FALSE}
-------------------------
-# Notes
 
-## Useful snippets
-  
-# module load java
-# module load new gcc/4.8.2 r/3.4.0
-# module load gcc/4.8.2 star/2.4.2a
-# module load samtools
-
-# bsub <script_file> -W 120 -n 8 -R "rusage[mem=4096]"
-# bsub -J <"jobname"> -w "done(<other_job_name_or_id>)" -W 640 -n 8 -R "rusage[mem=8192]" < dropseqpipe.sh
-# bsub W 120 -n 8 -R "rusage[mem=4096]" "R --vanilla --slave < RNA_seq.R > result.out"
-# bmod -W 24:00 JOBID
-# bqueues
-# bswitch QUEUENAME JOBID
-#
-# wget "ftp://ftp.ensembl.org/pub/release-90/fasta/mus_musculus/dna/Mus_musculus.GRCm38.dna.alt.fa.gz"
-# wget "ftp://ftp.ensembl.org/pub/release-90/gtf/mus_musculus/Mus_musculus.GRCm38.90.gtf.gz"
-# wget "ftp://ftp.ensembl.org/pub/release-90/fasta/mus_musculus/cdna/Mus_musculus.GRCm38.cdna.all.fa.gz"
-# wget "ftp://ftp.ensembl.org/pub/release-90/fasta/mus_musculus/ncrna/Mus_musculus.GRCm38.ncrna.fa.gz"
-# wget "ftp://ftp.ncbi.nlm.nih.gov/geo/series/GSE63nnn/GSE63472/suppl/GSE63472_mm10_reference_metadata.tar.gz"
-# curl "https://portals.broadinstitute.org/single_cell/bulk_data/dronc-seq-single-nucleus-rna-seq-on-mouse-archived-brain/all/594941" -o cfg.txt
-# curl -K cfg.txt
-
-# mv $HOME/file.ext $SCRATCH/file.ext
-------------------------
-```
-
-```{r setup, include=FALSE}
+``` {r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 knitr::opts_chunk$set(error = TRUE)
+#knitr::opts_chunk$set(root.dir = "../git/sta426/project")
+#knitr::opts_knit$set(root.dir = "../git/sta426/project")
 ```
-
 # Introduction
 
-* Describe the method
-* Motivate its development
-* Motivate choice
-* Describe scope
-  - Go from raw fastq data to DGE
-  - Do additional filtering on DGE
-  - Find PCs by eigenvalue gap method
-  - Plot PCA dim reduction and find clusters
-* Describe the data
-  - Nextera adapter
-  - Paired reads UMI+BarCode / sequence
-  - Read length
+Developments in RNA sequencing protocols enabled high-throughput and cost-effective analysis of single cell suspensions prepared from fresh tissues [@Macosko2015; @Ziegenhain2017]. In contrast, similar methods are lacking for clinical samples, archived materials and tissues that cannot be easily dissociated [@Habib2017]. Although the protocols published to date [@Habib2016; @Lake2016; @Lacar2016] enable RNA analyzes from such samples, they do not scale to large number of cells. 
 
-# Overview
+Variation of Drop-seq [@Macosko2015] method was presented in the paper ["Massively parallel single-nucleus RNA-seq with DroNc-seq"]( https://www.nature.com/articles/nmeth.4407) [@Habib2017] that addresses this limitation. Specifically, the EZ PREP Buffer (Sigma Cat #NUC-101) was used together with filtering through 35$\mu$m cell-strainer to obtain suspension of single nuclei and the design of microfluidics device was adjusted to account for lower amount of RNA in nuclei compared to cells. The nuclei were then processed according to the Drop-seq protocol [@Macosko2015] (see Figure \ref{fig:dropseq}). Briefly, nuclei were coencapsulated with barcoded beads and lysed. The released mRNA hybridized to unique barcodes, droplets were broken, and the beads collected in bulk. The hybridized mRNA was reverse-transcribed, yielding cDNA which was PCR amplified and sequenced. Subsequently, bioinformatic analysis confirmed biological relevance of resulting data by identifying cell-types with graph-based clustering algorithm [@Shekhar2016].
 
-In the filtered DGE matrix provided by the authors, there are 13313 cells(nuclei) and 17308 genes. We expect to arrive to similar numbers
+![Drop-seq Protocol. \label{fig:dropseq}](pics\dropseq.png)
 
-The data has been:
-**All these using DropSeq Tools**
+## Scope
 
-* Alligned 
-  + to mm10 mouse UCSC reference genome using STAR v2.4.0a, recording exonic regions
+In this study, we are interested in reproducing parts of the data analysis from the aforementioned paper. Specifically, we use the raw reads as input and eventually obtain 2-dimensional embedding where we assign class membership to each nucleus based on assignments made available by the authors. We then visually compare resulting plot with plot presented in the paper to asses the level to which we have managed to reproduce the data analysis.
+This report aims to be a guide through the analysis, describing individual steps. Should one want to implement similar workflow, this document can serve as a good starting point. 
+
+## Overview
+
+There is multitude of steps necessary to obtain the desired dimensionality-reduced plot. Before we delve into details, we consider first the top-level view of the procedure as summarized from the paper:
+
+1. Preprocessing (*command line, cluster*)
+
+    * barcodes filtered for minimum number of transcripts and aggregated (1 edit tolerance)
+    * gene counts aggregated on unique UMIs (1 substitution tolerance)
+    * reads with low Phred filtered out, trimmed from nucleus barcode (12 bases) and unique molecular index (8 bases)
   
-* Preprocessed
-  + barcodes filtered for minimum number of transcripts and aggregated (1 edit tolerance)
-  + gene counts aggregated on unique UMIs (1 substitution tolerance)
-  + reads with low Phred filtered out, trimmed from nucleus barcode (12 bases) and unique molecular index (8 bases)
-    
-* Exported
-  + transcript counts were assembled into digital gene expression (DGE) matrix
+2. Alignment (*command line, cluster*)
 
-**All these using in R**
-* the DGE was scaled by total number of UMI counts, multiplied per by mean number of transcripts and log transformed
-* effects of number of transcripts and genes detected per nucleus were [regressed out](http://satijalab.org/seurat/cell_cycle_vignette.html)
-* Nuclei with less than 200 genes and less than 10000 suable reads were filtered out
-* Genes detected in les then 10 nuclei were removed
-* Highly variable genes vere selected by fitting gamma-distribution relationship between mean counts and coefficent of variation. Genes with difference in coeficient of variation between empirical and expected lower than 0.2 were dropped. Also genes with mean transcript count lower than 0.005 were dropped.
+    * to mm10 mouse UCSC reference genome using STAR and recording exonic regions.
+   
+3. Export (*command line,  cluster*)
 
-# Working on Cluster
+    * transcript counts were assembled into digital gene expression (DGE) matrix.
+  
+4. Additional Filtering (*R, local*)
 
-In this project, we are working with rather large amounts of data. Morover some of the processing we do requires additional large storage and/or plenty of RAM. This is not feasible on most of personal computers and we therefore run most of the code on cluster. For that we use [Euler](https://scicomp.ethz.ch/wiki/Euler), cluster at [ETH](https://www.ethz.ch/de.html). 
+    * the DGE was scaled by total number of UMI counts, multiplied per by mean number of transcripts and log transformed
+    * effects of number of transcripts and genes detected per nucleus were [regressed out](http://satijalab.org/seurat/cell_cycle_vignette.html)
+    * nuclei with less than 200 genes were filtered out
+    * genes detected in less then 10 nuclei were removed.
+  
+5. Finding variable genes, dimensionality reduction and visualization (*R, local*)
+
+    * highly variable genes were selected by fitting gamma-distribution relationship between mean counts and coefficient of variation
+    * dimensionality of data was reduced, using the DGE matrix consisting only of highly variable genes 
+    * most significant principal components in data were chosen based on the largest value of eigenvalue gap
+    * 2D nonlinear embedding of the nuclei profiles was generated with tSNE using the previously identified principal components as input.
+  
+In the overview, the individual steps were labeled depending on whether they were carried out on cluster or on local machine in our own analysis. This separation was required due to large volumes of data and subsequent high computational complexity of most of the steps. As a consequence, most of the chunks in this report are not evaluated at knitting (`eval = FALSE`), instead precomputed objects are used. 
+
+# Wokrflow
+
+## Working on Cluster
+
+For the computationally complex parts of the analysis, [Euler](https://scicomp.ethz.ch/wiki/Euler), cluster at [ETH](https://www.ethz.ch/de.html), was used. 
 
 ### Connecting
-We log to Euler by:
+We log to Euler with:
 ``` {bash, eval = FALSE}
 ssh USERNAME@euler.ethz.ch
 ```
 
 ### Storage
-Euler offers its standard users (e.g. students) two places to deposit their data `home` and `scratch`, briefly, `home` will hold small data indefinitelly while `scratch` holds big data intermittently. (see also [comparsion](https://scicomp.ethz.ch/wiki/Getting_started_with_clusters#Comparison)).
+Euler offers its standard users (e.g. students) two places to deposit their data `home` and `scratch`. Briefly, `home` will hold small volumes of data indefinitely while `scratch` holds big data intermittently (see also [storage comparsion](https://scicomp.ethz.ch/wiki/Getting_started_with_clusters#Comparison)).
 
-The paths are as follows:
+The corresponding paths are as follows:
 
-```{bash, eval = FALSE}
+``` {bash, eval = FALSE}
 home="/cluster/home/USERNAME"
 scratch="/cluster/scratch/USERNAME"
 ```
-and we can access them also with `$HOME` and `$SCRATCH`, which is the preferred option.
+and we access them with `$HOME` and `$SCRATCH`.
 
 ### Modules
-Next we need to load modules required for our analysis and we like to do this anytime we log to the cluster. We can do this by adding corresponding lines to `.bashrc` file in the `home` directory:
+
+Next, we load modules required for our analysis and we do this every time we log to the cluster. To automate this setup, we define `.bashrc` file in the `home` directory:
 
 ``` {bash, eval = FALSE}
 mkdir -p $HOME/python/lib64/python3.6/site-packages
@@ -118,77 +115,50 @@ module load gcc/4.8.2 star/2.4.2a
 module load samtools
 ```
 
-### Software
-
-Couple of additional programs are needed for the analysis, specificaly:
-
-* [Drop-seq_tools-1.12](http://mccarrolllab.com/dropseq/)
-  + a suite of java scripts for preprocessing of Drop-seq data
-  + it comes already with [Picard](http://broadinstitute.github.io/picard/) which we will heavily rely on for utility functions
-  + there is a [cookbook](http://mccarrolllab.com/wp-content/uploads/2016/03/Drop-seqAlignmentCookbookv1.2Jan2016.pdf) available that we will follow closely, [Drop-seq Tutorial & Troubleshooting](http://mccarrolllab.com/drop-seq-troubleshootingtutorial-with-pictures-videos/) will help us as well.
-* [dropSeqPipe](https://github.com/Hoohm/dropSeqPipe)
-  + a wrapper for the Drop-seq_tools that provides `yaml` and `python` interface and makes uses of [Snakemake](http://snakemake.readthedocs.io/en/stable/) to build reproducible workflow
-* [FASTQC](https://www.bioinformatics.babraham.ac.uk/projects/fastqc/)
-  + a quality control tool for high throughput sequence data
-  
-All these (and potentional dependencies) are installed following the instructions at respective websites. We place them in `$HOME/Software`. 
-  
 ### Job submission
 
-When submitting jobs to cluster nodes, we use varations of the following example commands:
+When submitting jobs to cluster nodes, we use variations of the following example commands:
 
 ``` {bash, eval = FALSE}
 # for shell scripts
-bsub -J "<jobname>" -w "done(other_job_id)" -W 640 -n 8 -R "rusage[mem=8192]" < scriptname.sh
+bsub -J "<jobname>" -w "done(JOBID)" -W 640 -n 8 -R "rusage[mem=8192]" < scriptname.sh
 # for R scripts
 bsub -W 120 -n 8 -R "rusage[mem=4096]" "R --vanilla --slave < RNA_seq.R > result.out"
 ```
-where (all optional)
-- `-W` is the time limit in minutes,
-- `-n` is the number of threads
-- `-J` is the job name
-- `-R` is the memory requirement per thread
+where (all optional):
 
-# Reference Index
+* `-W` is the time limit in minutes,
+* `-n` is the number of threads
+* `-J` is the job name
+* `-R` is the memory requirement per thread
 
-To quantify transcript abundances we need a reference genome to aling our reads to. For our purposes, we use files prepared by the authors of the DropSeq method ([Macosko et al., 2015](http://linkinghub.elsevier.com/retrieve/pii/S0092-8674(15)00549-8)), that can be dowloaded [here](ftp://ftp.ncbi.nlm.nih.gov/geo/series/GSE63nnn/GSE63472/suppl/).
+## Dependencies
 
-In later steps we will be using STAR for alignement. To this end, we must first generate STAR index. This is done with:
+Multiple additional scripts and programs are needed for the preprocessing, alignment and DGE export. Specifically:
 
-```{bash, eval = FALSE}
-genome_dir="/cluster/scratch/mholub/reference/mm10_index"
-genome_fasta="/cluster/scratch/mholub/reference/mm10/mm10.fasta"
-genome_gtf="/cluster/scratch/mholub/reference/mm10/mm10.gtf"
-read_length=50
+* [Drop-seq_tools-1.12](http://mccarrolllab.com/dropseq/) & [Picard](http://broadinstitute.github.io/picard/)
 
-echo "'STAR version:\n'"
-STAR --version
-STAR --runMode genomeGenerate --runThreadN 8 --genomeDir $genome_dir \
---genomeFastaFiles $genome_fasta --sjdbGTFfile $genome_gtf --sjdbOverhang $read_length - 1
-```
+    * a suite of java scripts for preprocessing of Drop-seq data which we will make extended use of
+    * there is a  [manual](http://mccarrolllab.com/wp-content/uploads/2016/03/Drop-seqAlignmentCookbookv1.2Jan2016.pdf) available that we will follow closely
+    * [Drop-seq Tutorial & Troubleshooting](http://mccarrolllab.com/drop-seq-troubleshootingtutorial-with-pictures-videos/) then offers additional information on the experimental protocol.
+  
+* [dropSeqPipe](https://github.com/Hoohm/dropSeqPipe)
 
-Where the `read_length` is determined from the fastq files with:
+    * a wrapper for the Drop-seq Tools that provides `yaml` and `python` interface and makes uses of [Snakemake](http://snakemake.readthedocs.io/en/stable/) to build reproducible workflow.
+  
+* [FASTQC](https://www.bioinformatics.babraham.ac.uk/projects/fastqc/)
 
-```{python, eval = FALSE}
-def get_mean_read_length(wildcards):
-	total_length = 0
-	n = 1000000
-	with gzip.open(wildcards + '_tagged_unmapped.fastq.gz' , 'r') as reads:
-		fourthlines = islice(reads, 1, n, 4)
-		for line in fourthlines:
-			read = line.strip()
-			total_length += len(read)
-	return(int(total_length/(n/4)))
-```
+    * a general quality-control tool for high-throughput sequencing data.
+  
+All these (and potential dependencies) are installed following the instructions at respective websites and placed in `$HOME/Software`. 
 
-Note thar read lenght must be identical for construction of genome index and alignement.
+## Data
 
-# Download
+In the paper that we follow, authors sequenced archived brain tissue samples, previously obtained from human and mouse species. [Due to regulatory restrictions]( https://pubpeer.com/publications/E38493AECAF3189FC0708887F9EC39), only the raw reads sequenced from mouse tissues are available.  The data was deposited at the [Single Cell Portal](https://portals.broadinstitute.org/single_cell/study/dronc-seq-single-nucleus-rna-seq-on-mouse-archived-brain). We download the data in bulk with:
 
-The authors have deposited the data at the [SingleCell Portal](https://portals.broadinstitute.org/single_cell/study/dronc-seq-single-nucleus-rna-seq-on-mouse-archived-brain). These can be downloaded in bulk using:
-
-```{bash, eval = FALSE}
-curl "https://portals.broadinstitute.org/single_cell/bulk_data/dronc-seq-single-nucleus-rna-seq-on-mouse-archived-brain/all/000000" -o cfg.txt
+``` {bash, eval = FALSE}
+curl "https://portals.broadinstitute.org/single_cell/bulk_data/
+      dronc-seq-single-nucleus-rna-seq-on-mouse-archived-brain/all/000000" -o cfg.txt
 curl -K cfg.txt -o $SCRATCH
 ```
 
@@ -196,29 +166,87 @@ Note that the zeros at the end of the link indicate unique key for download that
 
 ### Rename
 
-For convenience we remove redundant suffix in the filename such that `file_001.fastq.gz` becomes `file.fastq.gz` with:
+For convenience we remove redundant suffix in the file name such that `file_001.fastq.gz` becomes `file.fastq.gz` with:
 
-```{bash, eval = FALSE}
+``` {bash, eval = FALSE}
 for fname in *.fastq.gz
 do
   mv "$fname" "$(echo "$fname" | sed -r 's/_001//')"
 done
 ```
+As result, we obtain 20 zipped fastq files in total size of 110 GB.
 
-# Preprocessing
+```
+-rw-r----- 1 USER T0000  2276111242 Dec 19 17:23 0_1a_S1_R1.fastq.gz
+-rw-r----- 1 USER T0000  6403618432 Dec 19 17:32 0_1a_S1_R2.fastq.gz
+-rw-r----- 1 USER T0000  2467148359 Dec 19 17:18 0_1b_S2_R1.fastq.gz
+-rw-r----- 1 USER T0000  6945108236 Dec 19 17:19 0_1b_S2_R2.fastq.gz
+-rw-r----- 1 USER T0000  8635163524 Dec 19 17:21 0_2a_S1_R1.fastq.gz
+-rw-r----- 1 USER T0000 23786888919 Dec 19 17:31 0_2a_S1_R2.fastq.gz
+-rw-r----- 1 USER T0000  1348694912 Dec 19 17:21 0_2b_S2_R1.fastq.gz
+-rw-r----- 1 USER T0000  3752821903 Dec 19 17:36 0_2b_S2_R2.fastq.gz
+-rw-r----- 1 USER T0000  3216586684 Dec 19 17:19 HP1_S1_R1.fastq.gz
+-rw-r----- 1 USER T0000  8362169363 Dec 19 17:26 HP1_S1_R2.fastq.gz
+-rw-r----- 1 USER T0000  3150012054 Dec 19 17:21 HP3_S1_R1.fastq.gz
+-rw-r----- 1 USER T0000  8720716415 Dec 19 17:27 HP3_S1_R2.fastq.gz
+-rw-r----- 1 USER T0000  3525694246 Dec 19 17:31 mHP2_S1_R1.fastq.gz
+-rw-r----- 1 USER T0000  9775604305 Dec 19 17:36 mHP2_S1_R2.fastq.gz
+-rw-r----- 1 USER T0000  1950157698 Dec 19 17:34 mPFC2_S2_R1.fastq.gz
+-rw-r----- 1 USER T0000  5428484811 Dec 19 17:33 mPFC2_S2_R2.fastq.gz
+-rw-r----- 1 USER T0000  2123092106 Dec 19 17:34 PFC1_S2_R1.fastq.gz
+-rw-r----- 1 USER T0000  5496781007 Dec 19 17:24 PFC1_S2_R2.fastq.gz
+-rw-r----- 1 USER T0000  2821470681 Dec 19 17:24 PFC3_S2_R1.fastq.gz
+-rw-r----- 1 USER T0000  7805172406 Dec 19 17:23 PFC3_S2_R2.fastq.gz
+```
 
-In the following I walk you through the steps required for reproducing the analysis presented in the paper [Massively parallel single-nucleus RNA-seq with DroNc-seq](http://dx.doi.org/10.1038/nmeth.4407) (Habib et al., 2017). The preprocessing is illustrated in the following figure:
+This corresponds to 10 samples as each sample requires 2 files `{sample}_R1.fastq.gz` and `{sample}_R2.fastq.gz`. `R1` file holds reads for cell and molecular barcode (also termed UMI, unique molecular identifier) and `R2` file then holds read from actual mRNA sequence (Figure \ref{fig:tworeads} [@Macosko2015]), both files are required for quantification of transcript abundance.
 
-![Preprocesing overview](C:\Users\marti\git\sta426\project\pics\dropseq_flowchart.png)
+<!---![Barcode and gene reads \label{fig:tworeads}](pics\two_reads.png)-->
 
+```{r tworeads, out.width = "50%", fig.cap = "Barcode and gene reads.", echo=FALSE, fig.align = "center"}
+knitr::include_graphics("pics/two_reads.png")
+```
 
-## dropSeqPipe
+## Reference Index
 
-We first setup the pipeline for preprocessing. We do that following the [Wiki](https://github.com/Hoohm/dropSeqPipe/wiki). The pipeline is implemented using [Snakemake](http://snakemake.readthedocs.io/en/stable/) and we control it's behavior by two configuration files, `config.yaml` and `local.yaml`. The content of these files will be more closely described when we go over individual steps of the pipeline. Remember that the pipeline is just a convenience wrapper for underlying DropSeq Tools scripts develeped at [McCarroll Lab](http://mccarrolllab.com/dropseq/) and running in Java.
+At later steps of the pipeline, we align the sequenced reads to a reference genome using [STAR]( https://github.com/alexdobin/STAR).  For that, we first download the reference genome file:
+
+```{bash, eval = FALSE}
+cd $SCRATCH
+mkdir reference; cd reference
+wget "ftp://ftp.ncbi.nlm.nih.gov/geo/series/GSE63nnn/GSE63472/suppl/
+      GSE63472_mm10_reference_metadata.tar.gz"
+tar xzvf GSE63472_mm10_reference_metadata.tar.gz
+```
+
+Next we call STAR to generate the index:
+
+``` {bash, eval = FALSE}
+genome_dir="$SCRATCH/reference/mm10/STAR_index"
+genome_fasta="$SCRATCH/reference/mm10/mm10.fasta"
+genome_gtf="$SCRATCH/reference/mm10/mm10.gtf"
+overhang_length=59
+
+mkdir genome_dir
+echo "'STAR version:\n'"
+STAR --version
+STAR --runMode genomeGenerate --runThreadN 8 --genomeDir $genome_dir \
+--genomeFastaFiles $genome_fasta --sjdbGTFfile $genome_gtf --sjdbOverhang $overhang_length
+```
+
+Where the `overhang_length` was determined based on information given in the paper and corresponds to `read_length` - 1. Note that `overhang_length` must be identical for the construction of genome index and the alignment.
+
+## Preprocessing
+
+Recall that, as our major milestone, we seek the digital expression matrix (DGE) summarizing data from all the raw fastq files (both genomic and barcode reads). Figure \ref{fig:dropseq_flowchart} shows simplified visual representation of the necessary procedure. 
+
+![Preprocessing overview [@Macosko2015]. \label{fig:dropseq_flowchart}](pics\dropseq_flowchart.png)
+
+Drop-seq Tools is a set of command line programs for preprocessing and alignment of Drop-seq (and DroNc-seq) data running in java. These scripts are wrapped by [dropSeqPipe](https://github.com/Hoohm/dropSeqPipe) into reproducible pipeline implemented in Python using [Snakemake](http://snakemake.readthedocs.io/en/stable/). We control the pipeline behavior by two configuration files, `config.yaml` and `local.yaml`, content of which is decried in following.
 
 The `config.yaml` file is:
 
-```{yaml, eval = FALSE}
+``` {js, eval = FALSE}
 Samples:
     0_2a_S1:
         fraction: 0.07
@@ -263,8 +291,9 @@ GLOBAL:
     data_type: singleCell
     allowed_aligner_mismatch: 10
     min_count_per_umi: 1
+    min_umis_per_cell: 2
     min_genes_per_cell: 200
-    min_umis_per_cell: 10000
+    min_reads_per_cell: 10000
     Cell_barcode:
         start: 1
         end: 12
@@ -277,47 +306,50 @@ GLOBAL:
         num_below_quality: 1
 ```
 
-Where paramteres in `Samples` section were selected based on experimental parameters. Specifically the `fraction` is given by the number of nuclei per ml (300'000) and number of droplets per ml (4'500'000) giving Poisson loading parameter of 0.07. 
+Where parameters in `Samples` section were determined based on experimental protocol. Specifically, the `fraction` is given by the number of nuclei per ml (300'000) and number of droplets per ml (4'500'000) giving Poisson loading parameter of 0.07. 
 
-The Expected number of cells can be determined from `knee plot`, example of which is given under (note that this one becomes available only atfert allignement and initial preprocessing steps). Ideally, we see a clear infelction point. It makes little sense to include more cells then the location of inflection point as these mostly  represent empty droplets. 
+The expected number of cells can be determined from `knee plot` (Figure \ref{fig:kneeplot}, note that this one is available only aposteriori, after alignment and initial preprocessing steps). Ideally, we can identify an inflection point beyond which STAMPs (single-cell transcriptomes attached to microparticles) represent droplets only with barcoded beads, and [no cells coencapsulated in them](http://mccarrolllab.com/drop-seq-troubleshootingtutorial-with-pictures-videos/). Alternatively, we can make use of the fact that the experimental protocol mentions that libraries were sample from a pool of 20'000 STAMPs, which, given the Poisson loading parameter, yields 1'400 as the expected number of cells. 
 
+![Knee plot. \label{fig:kneeplot}](pics\0_2a_S1_knee_plot.pdf)
 
-![Preprocesing overview](C:\Users\marti\git\sta426\project\plots\0_2a_S1_knee_plot.pdf)
-
-Ideally, we see a clear infelction point. It makes little sense to include more cells then the location of inflection point as these represent empty droplets.
-
-Parameters in `GLOBAL` are then selected based on information from DropSeq cookbook and the Methods section of the reproduced paper. 
-
-1) It would have been advantageous to do some filtering steps at this point as the resulting DGEs would be easier to work with, but from the paper it seems that authors did this filtering only in R and we stick to this approach.
-
-2) In contrast to the procedure described in paper, we decide to filter on minimal number of genes and transcripts per cell already in this step. Authors reported doing so only in R, but the approaches should be equivalent. Morover, the approach we adopt prevents dragging lot of unused data along. 
+Parameters in `GLOBAL` were selected based on information from [Drop-seq manual](http://mccarrolllab.com/wp-content/uploads/2016/03/Drop-seqAlignmentCookbookv1.2Jan2016.pdf) and the Methods section of the paper in study and will be described bellow for workflow steps that use them.
 
 The `local.yaml` file is:
 
-``` {yaml, eval = FALSE}
+``` {js, eval = FALSE}
 TMPDIR: $SCRATCH/temp
 PICARD: $HOME/Software/Drop-seq_tools-1.12/3rdParty/picard/picard.jar
 DROPSEQ: $HOME/Software/Drop-seq_tools-1.12
 STAREXEC: /cluster/apps/star/2.4.2a/x86_64/STAR
 FASTQCEXEC: $HOME/Software/FastQC/fastqc
 CORES: 8
-READLENGTH: 50
-TRIMEXEC: $HOME/Software/Trimmomatic-0.36/trimmomatic-0.36.jar
+READLENGTH: 59
 ```
+Where read length must be consistent with STAR index for all samples.
 
-Where read length must be consistent across all samples and index.
+With these files defined, we invoke the dropSeqPipe with
 
-In the following, we go over individual piepline steps. The sections are named by the corresponding DropSeq Tool or the name of the Picard's function. Parameters in curly braces or those given in capitals correspond to definitions in the two `.yaml` configuration files. 
+```{bash, eval = FALSE}
+$HOME/python/bin/dropSeqPipe -f $SCRATCH -c $HOME/local.yaml -m <mode>
+```
+where `<mode>` is subsequently:
 
-### 0. BCL to FASTQ
+* `fastqc` to perform quality control,
+* `pre-process` to go from raw reads to aligned and sorted data, 
+* `generate-plots` to genreate knee plots and do MultiQC, 
+* `extract-expression` to summarize data to digital expression matrix (DGE).
 
-In this step, `BCL` files were converted to `FASTQ` files. This can be done for example with [bcl2fastq](https://support.illumina.com/downloads/bcl2fastq_conversion_software_184.html). As we have directly downloaded the `.fastq` files, we may omit it.
+In the following, we go over individual dropSeqPipe/Drop-seq Tools steps. The sections are named by the corresponding Drop-seq Tool or the name of the Picard's function. Parameters in curly braces or those given in capitals correspond to definitions in the two `.yaml` configuration files listed above. 
 
-### 1. FastqToSam
+### BCL to FASTQ
+
+In this step, `BCL` files were converted to `FASTQ` files. This can be done for example with [bcl2fastq](https://support.illumina.com/downloads/bcl2fastq_conversion_software_184.html). As we have directly downloaded the `.fastq` files, we omit it.
+
+### FastqToSam
 
 Converts raw input files from `{sample}.fastq.gz` to `{sample}_unaligned.bam` using Picard's `FastqToSam`.
 
-``` {python, eval = FALSE}
+``` {js, eval = FALSE}
 rule fastq_to_sam:
 	"""Create an empty bam file linking cell/UMI barcodes to reads"""
 	input:
@@ -327,19 +359,20 @@ rule fastq_to_sam:
 		temp('{sample}_unaligned.bam')
 	threads: CORES
 	shell:
-		"""java -Djava.io.tmpdir={TMPDIR} -Xmx8g -Xms4096m -XX:ParallelGCThreads={CORES} -jar {PICARD} FastqToSam\
+		"""java -Djava.io.tmpdir={TMPDIR} -Xmx8g -Xms4096m -XX:ParallelGCThreads={CORES}\
+		-jar {PICARD} FastqToSam\
 		F1={input.r1}\
 		F2={input.r2}\
 		SM=DS O={output}"""
 ```
 
-### 2. TagBamWithReadSequenceExtended
+### TagBamWithReadSequenceExtended
 
-As described the DroNc-seq protocol sequences paired-end reads of different length. As a result we end up with 2 files for each sample, one holds barcodes, the other the actual RNA sequence. In our, case the shorter 20-bp sequence corresponds to the cell barcode (base 1-12) and molecular barcode (base 13-20) whereas the longer 50-bp sequence is the actual RNA.
+As described, the DroNc-seq protocol sequences paired-end reads of different length. As a result we end up with 2 files for each sample, one holds barcodes, the other the actual RNA sequence. In our case the shorter 20-bp sequence corresponds to the cell barcode (base 1-12) and molecular barcode (base 13-20) whereas the longer 60-bp sequence is the mRNA corresponding to genomic regions.
 
-In the previous step these two files were aggregated into one. In this step, we then tag the molecular and cell barcodes producing `{sample}_tagged_unmapped.bam` file. If more than `num_below_quality` bases have Phred score bellow `min_quality`, the read pair is flagged.
+In the previous step, these two files were aggregated into one. In this step, we then tag the molecular and cell barcodes producing `{sample}_tagged_unmapped.bam` file. The script is called twice, once for cell and once for molecular barcode. If more than `num_below_quality` bases have Phred score bellow `min_quality`, the read pair is flagged. 
 
-````{python, eval = FALSE}
+``` {js, eval = FALSE}
 rule stage1:
 	input: '{sample}_unaligned.bam'
 	output: '{sample}_tagged_unmapped.bam'
@@ -391,13 +424,14 @@ rule stage1:
 
 Where `...` indicate calls explained in the three sections bellow.
 
-### 3. FilterBAM
+### FilterBAM
 
-In this step, the read pairs that were flagged as low quality are discared to produce `{sample}_tagged_unmapped_filtered.bam` file.
+In this step, the read pairs that were flagged as low quality are discarded \
+to produce `{sample}_tagged_unmapped_filtered.bam` file.
 
 ...
 
-```{shell, eval = FALSE}
+``` {bash, eval = FALSE}
 {DROPSEQ}/FilterBAM TAG_REJECT=XQ\
 		INPUT=/dev/stdin\
 		OUTPUT=/dev/stdout COMPRESSION_LEVEL=0 |\
@@ -405,12 +439,13 @@ In this step, the read pairs that were flagged as low quality are discared to pr
 
 ...
 
-### 4. TrimStartingSequence
+### TrimStartingSequence
 
-Here we trim away possible traces of Ilumina Nextera SMART adapter from the 5'end. If there is at least 5 contiguous bases with no mismatch to the indicated `5PrimeSmartAdapter` sequence, we clip them off the read. We apply the konwledge that the barcode has 20 bp where the first 12 bp correspond to cell barcode and the remaining 8 bp to molecular barcode (UMI).
+Here we trim away possible traces of Ilumina Nextera SMART adapter from the 5' end. If there is at least 5 contiguous bases with no mismatch to the indicated `5PrimeSmartAdapter` sequence, they are clipped off the read. We apply the knowledge that the barcode has 20 bp where the first 12 bp correspond to cell barcode and the remaining 8 bp to molecular barcode (UMI).
 
 ...
-```{shell, eval = FALSE}
+
+``` {bash, eval = FALSE}
 {DROPSEQ}/TrimStartingSequence\
 		OUTPUT_SUMMARY={params.start_trim}\
 		SEQUENCE={params.SmartAdapter}\
@@ -421,12 +456,13 @@ Here we trim away possible traces of Ilumina Nextera SMART adapter from the 5'en
 ```
 ...
 
-### 5. PolyATrimmer
+### PolyATrimmer
 
-Now we trim away sequences from the 3'end that consist of at least 6 contiguous A's with no mismatches.
+Next, we trim away sequences from the 3' end that consist of at least 6 contiguous A's with no mismatches. This corresponds to the polyadenylated 3' end of mRNA.
+
 ...
 
-```{shell, eval = FALSE}
+``` {bash, eval = FALSE}
 {DROPSEQ}/PolyATrimmer\
 		OUTPUT_SUMMARY={params.polyA_trim}\
 		MISMATCHES=0\
@@ -436,31 +472,32 @@ Now we trim away sequences from the 3'end that consist of at least 6 contiguous 
 		
 ```
 
-### 6. SamToFastq
+### SamToFastq
 
 We then run Picard's function `SamToFastq` to convert the filtered files back to `fastq.gz` file format.
 
-``` {python,  eval = FALSE}
+``` {js,  eval = FALSE}
 
 rule sam_to_fastq:
 	input: '{sample}_tagged_unmapped.bam'
 	output: '{sample}_tagged_unmapped.fastq.gz'
 	threads: CORES
 	shell:
-		"""java -Xmx8g -Xms4096m -XX:ParallelGCThreads={CORES} -jar -Djava.io.tmpdir={TMPDIR}	{PICARD} SamToFastq\
+		"""java -Xmx8g -Xms4096m -XX:ParallelGCThreads={CORES} \
+		-jar -Djava.io.tmpdir={TMPDIR}	{PICARD} SamToFastq\
 		INPUT={input}\
 		FASTQ=/dev/stdout COMPRESSION_LEVEL=0|\
 		gzip > {output}"""
 
 ```
 
-# Alignement
+## Alignement {-}
 
-At this point we are ready to aling our reads to reference. There are multiple ways how to do it, but we stick to the approach used by the authors and use STAR. 
+At this point we are ready to align our reads to reference genome. There are multiple tools do this and also alignment-free quantification may be an attractive possibility. In our case, however, we follow the procedure described in the paper and use STAR.
 
-The `snake` / `bash` code that does this is shown bellow:
+We obtain the alignement with the following `snake` / `bash` snippet:
 
-``` {python, eval = FALSE}
+``` {js, eval = FALSE}
 # Configfile
 configfile: 'config.yaml'
 
@@ -495,18 +532,19 @@ rule STAR_align:
 
 We then continue in the preprocessing pipeline.
 
-### 7. SortSam
+### SortSam
 
 A Picard tool to sort the `{sample}.Aligned.out.sam` file in queryname order and convert to binary format.
 
-``` {python, eval = FALSE}
+``` {js, eval = FALSE}
 rule sort:
 	input:
 		samples = '{sample}.Aligned.sam'
 	output: temp('{sample}_Aligned_sorted.sam')
 	threads: CORES
 	shell:
-		"""java	-Djava.io.tmpdir={TMPDIR} -Dsamjdk.buffer_size=131072 -XX:GCTimeLimit=50 -XX:GCHeapFreeLimit=10 \
+		"""java	-Djava.io.tmpdir={TMPDIR} -Dsamjdk.buffer_size=131072 \
+		-XX:GCTimeLimit=50 -XX:GCHeapFreeLimit=10 \
 		-XX:ParallelGCThreads={CORES} -Xmx8g -Xms4096m -jar {PICARD} SortSam\
 		INPUT={input}\
 		OUTPUT={output}\
@@ -515,37 +553,40 @@ rule sort:
 
 ```
 
-### 8. MergeBamAlignment
+### MergeBamAlignment
 
-A Picard tool to merge the sorted STAR alignement with unaligned BAM file that has been previously tagged with molecular and cell barcodes. This recovers the read identity. Only primary alignements are considered.
+A Picard tool to merge the sorted STAR alignment with unaligned BAM file that has been previously tagged with molecular and cell barcodes. This recovers the read identity. Only primary alignments are considered.
 
-``` {python, eval = FALSE}
+``` {js, eval = FALSE}
 rule stage3:
 	input:	unmapped = '{sample}_tagged_unmapped.bam',
 			mapped = '{sample}_Aligned_sorted.sam'
 	output: temp('{sample}_gene_exon_tagged.bam')
 	threads: CORES
 	shell:
-		"""java -Djava.io.tmpdir={TMPDIR} -Xmx8g -Xms4096m -XX:ParallelGCThreads={CORES} -jar {PICARD} MergeBamAlignment\
+		"""java -Djava.io.tmpdir={TMPDIR} -Xmx8g -Xms4096m -XX:ParallelGCThreads={CORES}\
+		-jar {PICARD} MergeBamAlignment\
 		REFERENCE_SEQUENCE={GENOMEREF}\
 		UNMAPPED_BAM={input.unmapped}\
 		ALIGNED_BAM={input.mapped}\
 		INCLUDE_SECONDARY_ALIGNMENTS=false\
 		PAIRED_RUN=false\
 		OUTPUT=/dev/stdout COMPRESSION_LEVEL=0|\
-
-    ...
+		
+		...
   
 		"""
 ```
 
-### 9. TagReadWithGeneExon
+Where `...` indicates script explained in following section.
+
+### TagReadWithGeneExon
+
+For the analysis of DroNc-seq data we wish to retain only reads that map to exonic regions of the genome. Following script tags such reads with "GE" BAM tag using annotation defined in the `mm10.gtf`  (or equivalently `mm10.refFlat`) file.
 
 ...
 
-This script tags the reads with "GE" BAM tag if they are known to overlap an exon region of a gene as defined in annotation file (`mm10.gtf` or `mm10.refFlat`).
-
-``` {shell, eval = FALSE}
+``` {bash, eval = FALSE}
   export _JAVA_OPTIONS="-XX:ParallelGCThreads=8"
 	{DROPSEQ}/TagReadWithGeneExon\
 	OUTPUT={output}\
@@ -556,15 +597,15 @@ This script tags the reads with "GE" BAM tag if they are known to overlap an exo
 ```
 
 
-### 10. DetectBarcodeSynthesisErrors
+### DetectBarcodeSynthesisErrors
 
-The program checks the identifier sequence (cell + molecular barcode). Specifically, it looks at the distribution skew in UMIs (molecular barcode) associated with given cell barcode that could have been caused by incomplete synthesis of the cell barcode (e.g. length of only 11 bases), that would in turn result in high percentage of T at the last UMI position (see figure).
+The program checks the identifier sequence (cell + molecular barcode). Specifically, it looks at the distribution skew in UMIs (molecular barcode) associated with given cell barcode that could have been caused by incomplete synthesis of the cell barcode (e.g. length of only 11 bases), that would in turn result in high percentage of T's at the last UMI position (see Figure \ref{fig:barcodesynth}).
 
-![Cell and Molecular Barcode Illustration](C:\Users\marti\git\sta426\project\pics\SAoHTGaTD\detect_barcode_errors.png)
+![Cell and Molecular Barcode Illustration. \label{fig:barcodesynth}](pics\detect_barcode_errors.png)
 
-Also possible matches with any of the PCR primers are checked and if found, the barcodes and corresponding reads are dropped.
+Also, possible matches with any of the PCR primers are checked and, if found, the barcodes and corresponding reads are dropped.
 
-```{python, eval = FALSE}
+``` {js, eval = FALSE}
 rule bead_errors_metrics:
 	input: '{sample}_gene_exon_tagged.bam'
 	output: '{sample}_final.bam'
@@ -574,7 +615,8 @@ rule bead_errors_metrics:
 		summary = 'logs/{sample}_synthesis_stats_summary.txt',
 		barcodes = lambda wildcards: config['Samples'][wildcards.sample]['expected_cells'] * 2,
 		cells = lambda wildcards: config['Samples'][wildcards.sample]['expected_cells'],
-		metrics = 'logs/{sample}_rna_metrics.txt'
+		metrics = 'logs/{sample}_rna_metrics.txt',
+		umis_per_cell = config['GLOBAL']['min_umis_per_cell']
 	shell:
 		"""{DROPSEQ}/DetectBeadSynthesisErrors\
 		INPUT={input}\
@@ -582,7 +624,9 @@ rule bead_errors_metrics:
 		OUTPUT_STATS={params.out_stats}\
 		SUMMARY={params.summary}\
 		NUM_BARCODES={params.barcodes}\
+		MIN_UMIS_PER_CELL={params.umis_per_cell}\
 		PRIMER_SEQUENCE=AAGCAGTGGTATCAACGCAGAGTAC;
+		
 		{DROPSEQ}/SingleCellRnaSeqMetricsCollector\
 		INPUT={input}\
 		OUTPUT={params.metrics}\
@@ -593,17 +637,19 @@ rule bead_errors_metrics:
 
 ```
 
-**At this point the raw data preprocessing and alignement is finished.** The reads have been transformed from paired-end to single-end with corresponding cell and molecular barcodes. They have been also filtered and some barcodes were error-corrected.
+**At this point are the raw data preprocessing and the alignement finished.** The reads have been transformed from paired-end to single-end with corresponding cell and molecular barcodes. They have been also filtered and barcodes were error-corrected.
 
 
-# Extraction of Digital Gene Expression matrix
+## Extraction of Digital Gene Expression matrix
 
-Now we are ready to extract DGE matrix from the data. This is done by invking `DigitalExpression` function. To eliminate multi-mapping reads, we require the quality to be at least 10. We collapse UMI barcodes within a Hamming distance of 1 to account for possible errors during amplification.
+Now we are ready to extract DGE matrix from the data. This is done by invoking `DigitalExpression` function. To eliminate multi-mapping reads, we require the quality to be at least 10. We collapse UMI barcodes within a Hamming distance of 1 to account for possible errors during amplification. We also extract only reads that map to exonic regions of the genome (all default settings).
 
-Further we may impose minimal thresholds on number of genes per cell and number of reads per UMI  to remove empty droplets and effectively reduce the size of resulting matrix.
+In contrast to the procedure described in the paper, we decide to filter on minimal number of genes and reads per cell already in this step. Authors reported doing so only in R, but this depart should not prevent us from reproducing their results. Moreover, the approach we adopt prevents dragging lot of unused data along.
+
+Further, note that in the previous step we have also already introduced a threshold on minimal number of UMIs per cell, again, in accordance to the descriptions in the paper.
 
 The corresponding `snake` snippet looks like this:
-``` {python, eval = FALSE}
+``` {js, eval = FALSE}
 """Extract expression fof single species."""
 
 configfile: 'config.yaml'
@@ -622,7 +668,7 @@ rule extract_expression:
 		cells = lambda wildcards: config['Samples'][wildcards.sample]['expected_cells'],
 		count_per_umi = config['GLOBAL']['min_count_per_umi'],
 		genes_per_cell = config['GLOBAL']['min_genes_per_cell'],
-		umis_per_cell = config['GLOBAL']['min_umis_per_cell']
+		reads_per_cell = config['GLOBAL']['min_reads_per_cell']
 	shell:
 		"""{DROPSEQ}/DigitalExpression\
 		I={input}\
@@ -635,9 +681,9 @@ rule extract_expression:
 		NUM_CORE_BARCODES={params.cells}"""
 ```
 
-We also extract other useful data:
+Resulting is a DGE matrix that we will work with further. We may also extract other useful data, a matrix associating each gene with all corresponding cell and molecular barcodes:
 
-```{python, eval = FALSE}
+``` {js, eval = FALSE}
 rule extract_umi_per_gene:
 	input: '{sample}_final.bam'
 	output: 'logs/{sample}_umi_per_gene.tsv'
@@ -650,62 +696,70 @@ rule extract_umi_per_gene:
 		CELL_BC_FILE=summary/{params.sample}_barcodes.csv"""
 ```
 
-Resulting is a DGE matrix that we will work with further.
 
-# SEURAT
+## Additional processing
 
-**For following processing we can already move from cluster to local machine.**
+*For the following steps it is possible to move from cluster to local computer.*
 
-Seurat is a R package for DropSeq data analysis. We will use it to further process data and to plot some figures.
+From the information available in the paper, we deduce that authors used in-house scripts for the most part of the analysis of the data, including the parts done in R. Availability of these is limited to a previous publication [@Shekhar2016], as that one is accompanied by a [github repository](https://github.com/broadinstitute/BipolarCell2016) with example of analysis. It is unclear however, to which extent was the code used for the analysis in this paper.
+
+Other part of the analysis was done using [Seurat](http://satijalab.org/seurat/), an R package for exploration and analysis of single cell RNA-seq data. Importantly, this package already incorporates most of the functionality implemented in the code from the referred publication. It is unclear however, to which extent are corresponding functions equivalent in terms of their results.
+
+To honor reproducibility and also because some parts of the analysis that we aim to reproduce are available only in Seurat, we opt for this package as our workhorse for following steps.
+
+### Load, Scale and Normalize & Remove genes with low expression
 
 Setup basepath:
 
-``` {r basepath,  eval = FALSE}
-setwd("../git/sta426/project")
+``` {r basepath,  eval = TRUE}
 basepath <- getwd()
 ```
 
-Get paths to files and sample names:
+Get paths to files and names of all samples:
 
-``` {r filePaths}
-mouse.datafiles <- list.files(path = file.path(basepath, 'summary/27122017_filter'), pattern = "*_expression_matrix.txt$", full.names = TRUE)
-mouse.annofiles <- list.files(path = file.path(basepath, 'summary/27122017_filter'), pattern = "*_dge.summary.txt$", full.names = TRUE)
-mouse.umigenefiles <- list.files(path = file.path(basepath, 'logs'), pattern = "*_umi_per_gene.tsv$", full.names = TRUE)
+``` {r filePaths, eval = TRUE}
+mouse.datafiles <- list.files(path = file.path(basepath, 'summary/27122017_filter'),
+                              pattern = "*_expression_matrix.txt$", full.names = TRUE)
+mouse.annofiles <- list.files(path = file.path(basepath, 'summary/27122017_filter'),
+                              pattern = "*_dge.summary.txt$", full.names = TRUE)
+mouse.umigenefiles <- list.files(path = file.path(basepath, 'logs'),
+                                 pattern = "*_umi_per_gene.tsv$", full.names = TRUE)
 mouse <- list()
 mouse$samples <- gsub("(.*)_S[12]_dge.summary.txt$", "\\1", basename(mouse.annofiles))
 ```
 
-## Load, Scale and Normalize & Remove genes with low expression
-
-*Construct Seurat Object while retaining sample identity.* 
+**Construct Seurat Object while retaining sample identity** 
 
 To quote the paper:
 "The DGE matrix was scaled by total UMI counts, multiplied by the mean number of transcripts (calculated for each data set separately), and the values were log transformed".
 
-From observation and from available documentation, we infer that the scaling by total number of UMI counts happens implicitly and we thus need to specify only the latter two steps/.
+From observation and from available documentation, we infer that the scaling by total number of UMI counts happens implicitly and we thus need to specify only the latter two steps. Additionally we filter out genes with low  expression.
 
-Additionally we filter out genes with low and too rare expression.
+Quoting: 
+"A gene is considered detected in a cell if it has at least two unique UMIs (transcripts) associated with it. For each analysis, genes were removed that were detected in less than 10 nuclei."
 
-To quote the paper: 
-" A gene is considered detected in a cell if it has at least two unique UMIs (transcripts) associated with it. For each analysis, genes were removed that 
-were detected in less than 10 nuclei. "
-
-``` {r constructSeurat}
+``` {r constructSeurat, eval = FALSE}
+mean_counts <- vector(mode = "list", length = length(mouse$samples))
 for (i in 1:length(mouse$samples)){
-  
+  # Read data from files
   counts <- read.table(mouse.datafiles[i] , sep = "\t", header = TRUE)
   anno <- read.table(mouse.annofiles[i] , sep = "\t", header = TRUE)
   umi_per_gene <-  read.table(mouse.umigenefiles[i] , sep = "\t", header = TRUE)
   
-  num_obs <- aggregate(Num_Obs ~ Gene, data = umi_per_gene, sum)
+  # Agregate number of observations, unique umis, and cell barcodes on gene names
+  #num_obs <- aggregate(Num_Obs ~ Gene, data = umi_per_gene, sum)
   num_umis <- aggregate(Molecular_Barcode ~ Gene, data = umi_per_gene, length)
   num_cells <- aggregate(Cell.Barcode ~ Gene, data = umi_per_gene, length)
-  idx <- setNames((num_umis$Molecular_Barcode > 2) & (num_cells$Cell.Barcode > 10), levels(num_cells$Gene))
+  
+  # Prepare TF filter
+  idx <- setNames((num_umis$Molecular_Barcode > 2) & (num_cells$Cell.Barcode > 10),
+                  levels(num_cells$Gene))
   num_umis <- num_umis$Molecular_Barcode[idx]
   idx_match <- idx[match(counts[ , 1], names(idx))]
+  idx_match[is.na(idx_match)] <- FALSE
   
-  #move cell barcodes and gene names out of matrix
-  # Make sure unqiue barcodes across samples by prepending sample name
+  # Move cell barcodes and gene names out of matrix
+  # Assure unqiue barcodes across samples by prepending sample name
   rownames(counts) <- counts[ , 1]
   counts <- counts[, -1]
   colnames(counts) <- paste0(mouse$samples[i], ".", colnames(counts))
@@ -715,181 +769,283 @@ for (i in 1:length(mouse$samples)){
   anno <- anno[ ,-1]
   anno <- anno[match(colnames(counts), rownames(anno)), ]
   
-  mean_count <- mean(anno$NUM_TRANSCRIPTS, na.rm = TRUE)
-  
+  # Get mean count
+  mean_counts[i] <- mean(anno$NUM_TRANSCRIPTS, na.rm = TRUE)
+  # Get sparse representation of the data
   sparse_counts <- Matrix::Matrix(data.matrix(counts), sparse = TRUE)
   
-  
-  if (i ==1) {
-    
-    sObj <- Seurat::CreateSeuratObject(raw.data = sparse_counts, project = 'DroNcSeq', names.delim = ".",
-                                       normalization.method = NULL)
+  if (i == 1) {
+    # initialize Seurat
+    sObj <- Seurat::CreateSeuratObject(raw.data = sparse_counts, project = 'DroNcSeq',
+                                       names.delim = ".",
+                                       normalization.method = NULL,
+                                       min.cells = 10, min.genes = 200)
     sObj <- Seurat::AddMetaData(sObj, anno, colnames(anno))
     sObj@meta.data$orig.ident <- factor(mouse$samples[i])
-    sObj <- Seurat::NormalizeData(object = sObj, normalization.method = "LogNormalize", scale.factor = mean_count)
+    sObj <- Seurat::NormalizeData(object = sObj, normalization.method = "LogNormalize",
+                                  scale.factor = mean_counts[[i]])
     
   } else {
-    sObj_temp <- Seurat::CreateSeuratObject(raw.data = sparse_counts, project = 'DroNcSeq', names.delim = ".",
-                                            normalization.method = NULL)
+    # merge Seurat
+    sObj_temp <- Seurat::CreateSeuratObject(raw.data = sparse_counts, 
+                                            project = 'DroNcSeq',
+                                            names.delim = ".",
+                                            normalization.method = NULL,
+                                            min.cells = 10, min.genes = 200)
     sObj <- Seurat::AddMetaData(sObj, anno, colnames(anno))
     sObj_temp@meta.data$orig.ident <- factor(mouse$samples[i])
-    sObj_temp <- Seurat::NormalizeData(object = sObj_temp, normalization.method = "LogNormalize", scale.factor = mean_count)
+    sObj_temp <- Seurat::NormalizeData(object = sObj_temp, 
+                                       normalization.method = "LogNormalize",
+                                       scale.factor = mean_counts[[i]])
     
-    sObj <- Seurat::MergeSeurat(sObj, sObj_temp)
+    sObj <- Seurat::MergeSeurat(sObj, sObj_temp,
+                                min.cells = 10, min.genes = 200,
+                                do.normalize = TRUE)
     remove(sObj_temp)
   }
+  
+  sprintf("Run %d with mean UMI count %.3f finished.", i, mean_counts[[i]])
 }
 mouse$sObj <- sObj
-remove(sObj)
+remove(sObj, counts, sparse_counts, anno, i, num_cells, 
+       umi_per_gene, idx, idx_match)
+save('mouse', file = "mouseObj.RData")
 ```
 
-Do quick sanity check.
+This is time consuming for our big dataset. Alternatively, we may load a precomputed object:
 
-```{r check_sample}
+``` {r loadfile, eval = TRUE}
+load_path <- file.path(basepath, 'data/mouseObj2.RData')
+load(load_path)
+```
+
+Do quick sanity check:
+
+``` {r check_sample, eval = TRUE}
+library(Matrix)
 idxer <- sample(nrow(mouse$sObj@data), 7)
-mouse$sObj@scale.data[idxer, 1:7]
 mouse$sObj@data[idxer, 1:7]
 mouse$sObj@raw.data[idxer, 1:7]
 ```
+Violin plot:
 
-
-``` {r violinPlot}
-Seurat::VlnPlot(object = mouse$sObj, features.plot = c("nGene", "nUMI"), nCol = 2, group.by = "orig.ident", y.log = TRUE)
+``` {r violinPlot, eval = TRUE}
+Seurat::VlnPlot(object = mouse$sObj, features.plot = c("nGene", "nUMI"),
+                nCol = 2, group.by = "orig.ident", y.log = TRUE)
 ```
+Gene Plot:
 
-``` {r GenePlot}
-par(mfrow = c(1, 2))
-#Seurat::GenePlot(object = mouse$sObj, gene1 = "nUMI", gene2 = "percent.aa")
+``` {r GenePlot, eval = TRUE}
 Seurat::GenePlot(object = mouse$sObj, gene1 = "nUMI", gene2 = "nGene")
 ```
 
 
-## Regress out
+### Regress Out
 
 To quote authors of the paper: "To reduce the effects of library quality and complexity on cluster identity, a linear model was used to regress out effects of the number of transcripts and genes detected per nucleus (using the 'RegressOut' function in the Seurat software package)."
 
-To quote Seurat: "the `RegressOut` function has been deprecated, and replaced with the vars.to.regress argument in `ScaleData`."
+To quote Seurat: "[T]he `RegressOut` function has been deprecated, and replaced with the vars.to.regress argument in `ScaleData`."
 
-In brevity, we atempt to "regress-out" uninteresant sources of variation , including technical noise, batch effects, cell-cycle stage. This is done by learning a linear model to predict gene expression based on user-defined variables. 
+In brevity, we attempt to "regress-out" uninteresting sources of variation , including technical noise, batch effects, cell-cycle stage. This is done by learning a linear model to predict gene expression based on user-defined variables. 
 
-```{r regress_out}
-mouse$sObj <- Seurat::ScaleData(mouse$sObj, vars.to.regress = c('nGene', 'nUMI'), do.scale = FALSE, do.center = FALSE)
+``` {r regress_out, eval = FALSE}
+mouse$sObj <- Seurat::ScaleData(mouse$sObj, vars.to.regress = c('nGene', 'nUMI'), 
+                                do.scale = FALSE, do.center = FALSE)
 ```
 
+This is time consuming for our big dataset. Alternatively, we may load a precomputed object:
 
-## Find variable genes
-
-"To select highly variable genes, we fit a relationship between mean counts and coefficient of variation using a gamma distribution on the data from all of the genes and ranked genes by the extent of excess variation as a function of their mean expression (using a threshold of at least 0.2  difference in the coefficient of variation between the empirical and the expected and a minimal mean transcript count of 0.005)."
-
-* note that LogVMR is logarithm of variance to mean ratio, which is the logarith of coeficient of varation and note also that we define the threshold in non-log space, thus consistently with paper. (see Seurat::ExpMean)
-
-```{r variable_genes}
-mouse$sObj <- Seurat::FindVariableGenes(mouse$sObj, mean.function = Seurat::ExpMean, dispersion.function = Seurat::LogVMR, 
-                   x.low.cutoff = 0.005,  y.cutoff = 0.2, num.bin = 50)
+``` {r loadfile_scaled, eval = TRUE}
+load_path <- file.path(basepath, 'data/MouseObj_scaled.RData')
+load(load_path)
 ```
-## Dimensionality reduction - PCA
 
-Do dimensionality reduction. Extract more PCs than you are likely to need. 
+### Find variable genes
+
+Quoting: "To select highly variable genes, we fit a relationship between mean counts and coefficient of variation using a gamma distribution on the data from all of the genes and ranked genes by the extent of excess variation as a function of their mean expression (using a threshold of at least 0.2  difference in the coefficient of variation between the empirical and the expected and a minimal mean transcript count of 0.005)."
+
+The above discription unfortunately does not allow us to unambigiously identify the exact procedure for discriminating highly variable genes. However, we note that Seurat features a function that can be used for this purpose. We set the paremetrs mirroring the ones used in the paper and also based on [other available analyses](https://hemberg-lab.github.io/scRNA.seq.course/seurat-chapter.html). 
+
+Note that LogVMR is logarithm of variance to mean ratio, which is similar to the logarithm of coefficient of variation and note also that we define the thresholds in non-log space.
+
+``` {r variable_genes, eval = TRUE}
+mouse$sObj <- Seurat::FindVariableGenes(mouse$sObj, mean.function = Seurat::ExpMean, 
+                                        dispersion.function = Seurat::LogVMR, 
+                                        x.low.cutoff = 0.005,  y.cutoff = sqrt(0.2),
+                                        num.bin = 50)
+```
+
+### Dimensionality reduction - PCA
+
+Next, we reduce the dimensionality of the data with PCA. The dimensionality of the reduced representation is arbitrary but should be sufficient to identify significant PCs in the following step.
 
 Quoting the paper:
-"We used a DGE matrix consisting only of variable genes as defined above, scaled and log-transformed, and then reduced its dimensions with PCA"
+"We used a DGE matrix consisting only of variable genes as defined above, scaled and log-transformed, and then reduced its dimensions with PCA."
 
-``` {r PCA_extract}
-#mouse$sObj@dr$pca <- rsvd::rpca(mouse)
-mouse$sObj <- Seurat::RunPCA(mouse$sObj, pc.genes = mouse$sObj@var.genes, pcs.compute = 50, genes.print = 5)
+``` {r PCA_extract, eval = TRUE}
+mouse$sObj <- Seurat::RunPCA(mouse$sObj, pc.genes = mouse$sObj@var.genes,
+                             pcs.compute = 20, genes.print = 5)
+Seurat::PrintPCAParams(mouse$sObj)
 ```
 
 Quoting: "We [...] chose the most significant principal components (or PCs) based on the largest eigen value gap ...".
 
-This can be done by looking for PCs that have high enrichement at low p-values (dashed line represents uniform distribution).
+This can be done by looking for PCs that have high enrichment at low p-values (dashed line represents uniform distribution).
 
-```{r pickPCs}
-mouse$sObj <- Seurat::JackStraw(mouse$sObj, num.pc = 50, num.replicate = 100, do.print = TRUE)
+``` {r pickPCs, eval = FALSE}
+mouse$sObj <- Seurat::JackStraw(mouse$sObj, num.pc = 20,
+                                num.replicate = 100, do.print = TRUE)
+```
+
+This is time consuming for our big dataset. Alternatively, we may load a precomputed object:
+
+``` {r loadJackstraw, eval = TRUE}
+mouseObj_path <- file.path(basepath, 'data/mouseObj_jackstraw_tsne.RData')
+load(mouseObj_path)
+Seurat::PrintPCAParams(mouse$sObj)
+```
+
+``` {r plotjackstraw, eval = TRUE}
 Seurat::JackStrawPlot(mouse$sObj, PCs = 1: 9, nCol = 3)
 ```
 
-We can also check the explained variance plot, that can yield simialr insight.
+We can also use more approximate technique and look at the explained variance plot:
 
-``` {r explainedVariance}
+``` {r explainedVariance, eval = TRUE}
 Seurat::PCElbowPlot(mouse$sObj)
+```
+
+From the plots, it looks like 7 may be appropriate number of PCs to retain.
+
+### Dimensionality Reduction - tSNE
+
+Next we compute 2D embedding using tSNE. 
+
+Quoting:  "We generated a 2D nonlinear embedding  of the nuclei profiles using tSNE. The scores along the top significant PCs estimated above were used as input to the algorithm ([...] with a maximum of 2,000 iteration [..] and setting the perplexity parameter to 100.)"
+
+
+``` {r RunTSNE, eval = FALSE}
+
+mouse$sObj <- Seurat::RunTSNE(mouse$sObj, reduction.use = "pca", dims.use = 1:7,
+                              dim.embed = 2, perplexity = 100, max_iter = 2000)
+
+# mouse$tsne <- Rtsne::Rtsne((mouse$sObj@dr$pca@cell.embeddings[ ,grep("PC[1-7]$",
+#                             colnames(mouse$sObj@dr$pca@cell.embeddings))]), 
+#                            pca = FALSE, perplexity = 100, max_iter = 2000, dims = 2)
+Seurat::PrintTSNEParams(mouse$sObj)
+```
+
+This is time consuming for our big dataset. Alternatively, we may use the previously precomputed result:
+
+``` {r loadTSNE, eval = TRUE}
+mouseObj_path <- file.path(basepath, 'data/mouseObj_jackstraw_tsne.RData')
+#load(mouseObj_path)
+Seurat::PrintTSNEParams(mouse$sObj)
+```
+
+### Visualization and comparison
+
+Finally, we plot the data in the space of 2D tSNE embedding. We also color the cells by the cell-type assignment as reported in the data made available with the publication. This assignment was obtained by graph-based clustering algorithm. Briefly, the cells were embedded in K-nearest neighbor (KNN) graph based on the euclidean distance in PCA space, with edges drawn between cells with similar gene expression patterns. The algorithm partitioned this graph into highly interconnected 'quasi-cliques' or 'communities'.
+
+
+``` {r load_cluster, eval = TRUE}
+mouse.clusterfile <- file.path(basepath, 'data/Mouse_Meta_Data_with_cluster.txt')
+mouse$clusters <- read.table(mouse.clusterfile , sep = "\t", header = TRUE)
+mouse$clusters <- mouse$clusters[-1, ]
+mouse$clusters$NAME <- gsub("_", ".", mouse$clusters$NAME)
+mouse$clusters$NAME <- gsub("-", "_", mouse$clusters$NAME)
+unassigned <- grepl("Unclassified[0-9]", mouse$clusters$Cluster)
+mouse$clusters$Cluster[unassigned] <- "Unclassified1"
+mouse$clusters$ClusterID[unassigned] <- 
+  min(as.integer(unique(mouse$clusters$ClusterID[grepl("Unclassified[0-9]",
+                                                       mouse$clusters$Cluster)])))
+
+mouse$clusters <- mouse$clusters[match(rownames(mouse$sObj@meta.data),
+                                       mouse$clusters$NAME), ]
+levels(mouse$clusters$Cluster) <- c(levels(mouse$clusters$Cluster), "unkn.") 
+mouse$clusters$Cluster[is.na(mouse$clusters$ClusterID)] <- "unkn."
+new_ident <- setNames(mouse$clusters$Cluster, names(mouse$sObj@ident))
+mouse$sObj@ident <- new_ident
 
 ```
 
-From the plots, it looks like 4-8 PCs is a reasonable choice. Let's take 4.
-
-## Dimensionality Reduction - tSNE
-
-``` {r RunTSNE}
-mouse$sObj <- Seurat::RunTSNE(mouse$sObj, reduction.use = "pca", dims.use = 1:4, dim.embed = 2)
+``` {r plotTSNE, eval = TRUE}
+Seurat::TSNEPlot(mouse$sObj, 
+                 cells.use = mouse$sObj@cell.names[!is.na(mouse$clusters$ClusterID) &
+                                                     mouse$sObj@ident != "Unclassified1"],
+                 do.label = FALSE)
 ```
 
-```{r plotTSNE}
-Seurat::TSNEPlot(mouse$sObj, do.label = TRUE)
+Overall, we see that the cells represented by our data tend to form clusters according to the cell-type assignment obtained in the publication. This is however not generally true for all cells.
+
+# Conclusion 
+
+In this study we have analyzed DroNc-seq data from the paper that pioneered the method. The steps of bioinformatic analysis are mostly identical to those for single-cell Drop-seq. Specifically, we have:
+
+*	Preprocessed the raw data,
+
+*	aligned reads to reference genome,
+
+*	filtered the reads and cells,
+
+*	summarized the transcript abundances in digital expression matrix, 
+
+*	identified highly variable genes,
+
+*	reduced dimensionality of data with PCA,
+
+*	identified significant PCs based on the largest eigenvalue gap,
+
+*	visualized the data in 2D-space after nonlinear tSNE embedding,
+
+*	and visually confirmed cell-type assignments.
+
+Overall, we can say that we have arrived to qualitatively similar results as the authors of the publication. The reason why the results are not identical is mainly the fact that the data-analysis pipeline comprises multitude of tunable parameters that are often interchangeable or, conversely, mutually exclusive and usually neither well documented nor clearly identified in the publication. The necessity to work with big data and to run significant part of the analysis on cluster complicated our pursuit as it prolonged time of a development cycle, with wall-time of individual scripts exceeding 12 hours in extreme cases. Given the time available for the project, this limited possible number of iterations we could conduct to search the parameter space for our analysis. Furthermore, some combination of parameters produced a DGE that was too big to be worked with locally and therefore were not investigated further.
+
+For future work on the project, we recommend thoroughly investigating the wrapping of DropSeq Tools by dropSeqPipe as the latter, although conveniently chaining the commands and aiming for rerpoducibility, may obviate some settings of the former and may introduce spurious errors to the analysis when applied to slightly different problem then initially developed for. Next, multiple settings for extraction of DGE matrix should be tested out as these allow us to filter genes/cells/reads/UMIs based on several criteria and may therefore have important impact for downstream analysis. Similarly, Seurat functions for filtering of genes/cells and identification of variable genes can be tested with different parameters to observe impact on the following dimensionality reduction. Furthermore, clustering can be performed with `Seurat::FindClusters()` function, while also varying the number of PCs retained as input, and the result quantitatively compared to class assignment obtained in the discussed publication.
+
+# Acknowledgment {-}
+
+We thank authors of [Drop-seq Tools](http://mccarrolllab.com/dropseq/), [dropSeqPipe](https://github.com/Hoohm/dropSeqPipe) for the developed and published code. Despite its imperfections, our pursuit would be impossible without the extensive work that went into development of this software. Similarly, we are grateful for computing resources available to students at ETH via [Euler](https://scicomp.ethz.ch/wiki/Euler). Last but not least, thanks go to the Prof. Robinson and his students and co-workers for organizing the STA426 course that this work was done in scope of. Although very time consuming, the course provided ample opporunites to gain skills in the field of statistical analysis of high-throughput omics data.
+
+# Appendix {-}
+
+## Listing of commands useful when working on cluster {-}
+
+``` {bash appendix, eval = FALSE}
+# change execution time of a job
+bmod -W 24:00 JOBID
+# list available queues
+bqueues
+# switch job to another queue
+bswitch QUEUENAME JOBID
+# move file between storages
+mv $HOME/file.ext $SCRATCH/file.ext
+# ensure java has NUMCORES available 
+export _JAVA_OPTIONS="-XX:ParallelGCThreads=NUMCORES"
+# get help for some Drop-seq Tool
+/path/to/DropSeqScript -- -h
 ```
 
-Seurat::NegBinomRegDETest()
-Seurat::AverageExpression()
-Seurat::GetClusters ()
+## STAR Summary {-}
 
+Figure \ref{fig:star_stats}.
 
-# Additional Filtering on DGE
-
-Authors report additional processing on the extacted DGE 
-
-### ALTERNATIVE: Using SALMON for Allignement
-
-```{r, eval = FALSE}
-# Prepare paths
-data_dir <- "/cluster/scratch/mholub"
-output_dir <- "/cluster/home/mholub/output"
-reference_dir <- "/cluster/scratch/mholub/reference"
-path_to_fastqc <- "/cluster/home/mholub/Software/FastQC/fastqc"
-path_to_salmon <- "/cluster/home/mholub/Software/Salmon-0.8.2_linux_x86_64/bin/salmon"
-path_to_samtools <- "/cluster/home/mholub/Software/samtools/bin/samtools"
-
-
-# Find files
-fastq.files <- list.files(path = data_dir, pattern = "unmapped.fastq.gz$", full.names = TRUE)
-(cmd <- sprintf("head %s", fastq.files[1]))
-system(cmd)
-
-## Index reference transcriptome for use with Salmon
-reference_path <- paste0(scratch, '/reference/mm10/mm10.fasta')
-index_path <- paste0(scratch, '/reference/mm10_index_salmon/mm10.sidx')
-
-(cmd <- sprintf("%s index -t %s -i %s -p 8 -k 23", 
-                path_to_salmon,
-                reference_path,
-                index_path))
-system(cmd)
-
-# Quantify transcript abundances
-gtf_path <- paste0(reference_dir, "/mm10.gtf")
-out_f <- gsub("\\..*", "", gsub("(.*)/([^\\.]+[\\.])","\\2", fastq.files[1]))
-salmon_res <- sprintf("%s/%s",output_dir, out_f)
-(cmd <- sprintf(
-                "%s quant -i %s -l A -r %s -o %s -p 8 -k 23 -g %s --writeMappings %s", # We have single end read as the other end is jut UMI and Barcode
-                #"%s quant -i %s -l A -1 %s -2 %s -o %s -p 4 -k 19", #we have paired reads
-                path_to_salmon,
-                index_path,
-                fastq.files,
-                salmon_res,
-                gtf_path,
-                data_dir))
-system(cmd)
-
-# Convert sam file to binary bam file and sort alignments
-sbam_file <- paste0(data_dir, 'sometext')
-(cmd <- sprintf("%s view -b %s | %s sort -T tmp -O bam - > %s",
-                path_to_samtools, 
-                paste0(sbam_file, ".sam"),
-                path_to_samtools, 
-                paste0(sbam_file, ".bam")))
-system(cmd)
-
-# Index bam file
-(cmd <- sprintf("%s index %s/sometext.bam", 
-                path_to_samtools, 
-                output_dir))
-system(cmd)
+```{r star_stats, out.width = "95%", fig.cap = "STAR Alignement Summary", echo = FALSE, fig.align = "center"}
+knitr::include_graphics("pics/STAR_Log_Stat.pdf")
 ```
+
+## MultiQC Summary {-}
+
+MultiQC summary for all files is available in document `data\multiqc_report.html`.
+
+## Cluster Job Reports {-}
+
+Example of cluster job reports is available in `data\cluster_reports`.
+
+## Sessioninfo {-}
+``` {r sessioninfo}
+sessionInfo()
+```
+
+
